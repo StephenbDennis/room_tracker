@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Room Tracker — static preview</title>
+<!-- Uses the real stylesheet. The canvas drawing below is a verbatim port of
+     draw() in src/render/RoomCanvas.tsx, with a frozen scene instead of live
+     data. This file is a design preview only; the real app is the Vite build. -->
+<link rel="stylesheet" href="./src/styles.css" />
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>Room Tracker</h1>
+    <div class="actions">
+      <span class="badge ok">node-a1b2c3</span>
+      <button>Push config to device</button>
+      <button>Disconnect</button>
+    </div>
+  </header>
+
+  <main>
+    <div class="canvas-wrap"><canvas class="room-canvas" id="c"></canvas></div>
+
+    <aside>
+      <div class="toolbar">
+        <button>+ Event box</button>
+        <button>+ Sensor</button>
+        <button>Export</button>
+        <label class="file-btn">Import</label>
+      </div>
+
+      <section class="panel">
+        <h3>Room</h3>
+        <div class="row">
+          <label>Width (mm)<input type="number" value="5000" /></label>
+          <label>Depth (mm)<input type="number" value="4000" /></label>
+        </div>
+        <p class="hint">Config version 7</p>
+      </section>
+
+      <section class="panel">
+        <h3>Event box</h3>
+        <label>Name<input value="doorway" /></label>
+        <div class="row">
+          <label>Width (mm)<input type="number" value="900" /></label>
+          <label>Height (mm)<input type="number" value="1400" /></label>
+        </div>
+        <label>Rotation (deg)
+          <input type="range" min="0" max="179" value="0" />
+          <span class="mono">0&deg;</span>
+        </label>
+
+        <h4>Trigger when</h4>
+        <div class="row">
+          <label>Targets
+            <select><option>moving</option><option>any</option><option>stopped</option></select>
+          </label>
+          <label>Count
+            <select><option>at least</option><option>exactly</option><option>at most</option></select>
+          </label>
+          <label>n<input type="number" value="1" /></label>
+        </div>
+        <label>Entry debounce (ms)<input type="number" value="300" /></label>
+        <p class="hint">Radar output is jumpy. With no debounce a single stray
+          frame at the boundary will fire the output.</p>
+
+        <h4>Untrigger</h4>
+        <label>Mode
+          <select><option>when conditions stop</option><option>after a fixed time</option></select>
+        </label>
+        <label>Hold after clear (ms)<input type="number" value="5000" /></label>
+        <label>Max on time (ms, 0 = no cap)<input type="number" value="0" /></label>
+
+        <h4>Actions</h4>
+        <div class="row action">
+          <label>Node<select><option>a1b2c3</option><option>d4e5f6</option></select></label>
+          <label>GPIO<input type="number" value="12" /></label>
+          <label>Active<select><option>high</option><option>low</option></select></label>
+          <button class="danger small">&times;</button>
+        </div>
+        <button>+ GPIO action</button>
+
+        <label class="check"><input type="checkbox" checked /> Enabled</label>
+        <button class="danger">Delete event box</button>
+      </section>
+
+      <section class="panel">
+        <h3>Devices</h3>
+        <table class="devices"><tbody>
+          <tr><td><span class="dot dot-ok"></span></td><td class="mono">node-a1b2c3</td>
+              <td class="mono">v7</td><td class="hint">connected</td></tr>
+          <tr><td><span class="dot dot-ok"></span></td><td class="mono">node-d4e5f6</td>
+              <td class="mono">v7</td><td class="hint">in range -58dBm</td></tr>
+          <tr><td><span class="dot dot-warn"></span></td><td class="mono">node-9f2a11</td>
+              <td class="mono">v5</td><td class="hint">config out of date</td></tr>
+          <tr><td><span class="dot dot-gone"></span></td><td class="mono">node-77c0de</td>
+              <td class="mono">v7</td><td class="hint">not seen 42s</td></tr>
+        </tbody></table>
+      </section>
+    </aside>
+  </main>
+</div>
+
+<script>
+/* ---- frozen scene ---- */
+const config = {
+  room: { w_mm: 5000, h_mm: 4000 },
+  nodes: [
+    { id: 'a1b2c3', x_mm: 0,    y_mm: 0,    theta_deg: 45,  enabled: true },
+    { id: 'd4e5f6', x_mm: 5000, y_mm: 4000, theta_deg: 225, enabled: true },
+  ],
+  zones: [
+    { id:'z1', name:'desk',    enabled:true, rect:{cx:1300,cy:900, w:1400,h:800, rot_deg:0} },
+    { id:'z2', name:'doorway', enabled:true, rect:{cx:4300,cy:2000,w:900, h:1400,rot_deg:0} },
+    { id:'z3', name:'sofa',    enabled:true, rect:{cx:2200,cy:3100,w:1800,h:900, rot_deg:15} },
+  ],
+};
+const tracks = [
+  { id:1, x_mm:4300, y_mm:2150, vx_mms:-620, vy_mms:280, motion:'moving' },
+  { id:2, x_mm:1450, y_mm:2350, vx_mms:0,    vy_mms:0,   motion:'stopped' },
+  { id:3, x_mm:2350, y_mm:3050, vx_mms:900,  vy_mms:-240,motion:'moving' },
+];
+const zoneStates = new Map([
+  [0, { index:0, active:false, count:0 }],
+  [1, { index:1, active:true,  count:1 }],   // triggered -> red
+  [2, { index:2, active:false, count:1 }],
+]);
+const selected = { kind:'zone', id:'z2' };
+
+/* ---- geometry (ports of src/model/geometry.ts) ---- */
+const rad = d => d * Math.PI / 180;
+function rectCorners(r) {
+  const a = rad(r.rot_deg), c = Math.cos(a), s = Math.sin(a);
+  const hw = r.w/2, hh = r.h/2;
+  return [[-hw,-hh],[hw,-hh],[hw,hh],[-hw,hh]].map(([lx,ly]) => ({
+    x: r.cx + lx*c - ly*s, y: r.cy + lx*s + ly*c }));
+}
+const SENSOR_FOV_DEG = 60, SENSOR_RANGE_MM = 6000;
+function sensorWedge(pose, steps = 16) {
+  const pts = [{ x: pose.x_mm, y: pose.y_mm }];
+  for (let i = 0; i <= steps; i++) {
+    const t = -SENSOR_FOV_DEG + (2*SENSOR_FOV_DEG*i)/steps;
+    const a = rad(pose.theta_deg + t);
+    pts.push({ x: pose.x_mm + Math.cos(a)*SENSOR_RANGE_MM,
+               y: pose.y_mm + Math.sin(a)*SENSOR_RANGE_MM });
+  }
+  return pts;
+}
+
+/* ---- view + draw (verbatim port of RoomCanvas.tsx) ---- */
+const PAD = 32, HANDLE_PX = 9;
+function makeView(cw, ch, rw, rh) {
+  const scale = Math.min((cw - PAD*2)/rw, (ch - PAD*2)/rh);
+  return { scale, ox: (cw - rw*scale)/2, oy: (ch - rh*scale)/2, h: ch };
+}
+const toScreen = (v,p) => ({ x: v.ox + p.x*v.scale, y: v.h - v.oy - p.y*v.scale });
+
+function draw(ctx, size, cfg, tracks, zoneStates, selected) {
+  const v = makeView(size.w, size.h, cfg.room.w_mm, cfg.room.h_mm);
+
+  ctx.clearRect(0,0,size.w,size.h);
+  ctx.fillStyle = '#0e1117';
+  ctx.fillRect(0,0,size.w,size.h);
+
+  ctx.strokeStyle = '#1c2230'; ctx.lineWidth = 1;
+  for (let x = 0; x <= cfg.room.w_mm; x += 1000) {
+    const a = toScreen(v,{x,y:0}), b = toScreen(v,{x,y:cfg.room.h_mm});
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+  }
+  for (let y = 0; y <= cfg.room.h_mm; y += 1000) {
+    const a = toScreen(v,{x:0,y}), b = toScreen(v,{x:cfg.room.w_mm,y});
+    ctx.beginPath(); ctx.moveTo(a.x,a.y); ctx.lineTo(b.x,b.y); ctx.stroke();
+  }
+
+  const tl = toScreen(v,{x:0,y:cfg.room.h_mm});
+  ctx.strokeStyle = '#3d4a63'; ctx.lineWidth = 2;
+  ctx.strokeRect(tl.x, tl.y, cfg.room.w_mm*v.scale, cfg.room.h_mm*v.scale);
+
+  for (const n of cfg.nodes) {
+    if (!n.enabled) continue;
+    const pts = sensorWedge(n).map(p => toScreen(v,p));
+    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+    for (const p of pts.slice(1)) ctx.lineTo(p.x,p.y);
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(90, 160, 255, 0.07)'; ctx.fill();
+  }
+
+  cfg.zones.forEach((z,i) => {
+    const st = zoneStates.get(i);
+    const active = st?.active ?? false;
+    const pts = rectCorners(z.rect).map(p => toScreen(v,p));
+
+    ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+    for (const p of pts.slice(1)) ctx.lineTo(p.x,p.y);
+    ctx.closePath();
+
+    ctx.fillStyle = active ? 'rgba(255, 96, 92, 0.30)' : 'rgba(120, 200, 160, 0.13)';
+    ctx.fill();
+    ctx.strokeStyle = active ? '#ff605c' : '#4fbf8b';
+    ctx.lineWidth = (selected?.kind === 'zone' && selected.id === z.id) ? 3 : 1.5;
+    if (!z.enabled) ctx.setLineDash([6,4]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    const c = toScreen(v,{x:z.rect.cx,y:z.rect.cy});
+    ctx.fillStyle = active ? '#ffd7d6' : '#a9c7ba';
+    ctx.font = '12px ui-sans-serif, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(z.name, c.x, c.y - 4);
+    ctx.fillText((st?.count ?? 0) + ' inside', c.x, c.y + 12);
+
+    if (selected?.kind === 'zone' && selected.id === z.id) {
+      const br = pts[2];
+      ctx.fillStyle = '#4fbf8b';
+      ctx.fillRect(br.x - HANDLE_PX/2, br.y - HANDLE_PX/2, HANDLE_PX, HANDLE_PX);
+    }
+  });
+
+  for (const n of cfg.nodes) {
+    const p = toScreen(v,{x:n.x_mm,y:n.y_mm});
+    const sel = selected?.kind === 'node' && selected.id === n.id;
+    ctx.beginPath(); ctx.arc(p.x,p.y, sel?10:7, 0, Math.PI*2);
+    ctx.fillStyle = n.enabled ? '#5aa0ff' : '#5a6474'; ctx.fill();
+    ctx.strokeStyle = '#0e1117'; ctx.lineWidth = 2; ctx.stroke();
+
+    const a = rad(n.theta_deg);
+    ctx.beginPath(); ctx.moveTo(p.x,p.y);
+    ctx.lineTo(p.x + Math.cos(a)*22, p.y - Math.sin(a)*22);
+    ctx.strokeStyle = '#5aa0ff'; ctx.lineWidth = 2; ctx.stroke();
+
+    ctx.fillStyle = '#93a4bd';
+    ctx.font = '11px ui-sans-serif, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(n.id, p.x, p.y + 22);
+  }
+
+  for (const t of tracks) {
+    const p = toScreen(v,{x:t.x_mm,y:t.y_mm});
+    const moving = t.motion === 'moving';
+    ctx.beginPath(); ctx.arc(p.x,p.y,9,0,Math.PI*2);
+    ctx.fillStyle = moving ? '#ffc857' : '#8b93a5'; ctx.fill();
+
+    if (moving) {
+      const e = toScreen(v,{x:t.x_mm+t.vx_mms, y:t.y_mm+t.vy_mms});
+      ctx.beginPath(); ctx.moveTo(p.x,p.y); ctx.lineTo(e.x,e.y);
+      ctx.strokeStyle = 'rgba(255, 200, 87, 0.65)'; ctx.lineWidth = 2; ctx.stroke();
+    }
+
+    ctx.fillStyle = '#0e1117';
+    ctx.font = 'bold 10px ui-sans-serif, system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(String(t.id), p.x, p.y + 3);
+  }
+}
+
+const el = document.getElementById('c');
+const wrap = el.parentElement;
+const size = { w: wrap.clientWidth, h: wrap.clientHeight };
+const dpr = window.devicePixelRatio || 1;
+el.width = size.w * dpr; el.height = size.h * dpr;
+el.style.width = size.w + 'px'; el.style.height = size.h + 'px';
+const ctx = el.getContext('2d');
+ctx.setTransform(dpr,0,0,dpr,0,0);
+draw(ctx, size, config, tracks, zoneStates, selected);
+</script>
+</body>
+</html>

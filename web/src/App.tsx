@@ -1,0 +1,256 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BleLink } from './ble/client';
+import type { NodeStatus, Track, ZoneState } from './ble/codec';
+import { bluetoothAvailable, type DeviceLink } from './ble/link';
+import {
+  loadLocal,
+  newZone,
+  saveLocal,
+  validateConfig,
+  withBumpedVersion,
+  type RoomConfig,
+} from './model/config';
+import { RoomCanvas, type Selection } from './render/RoomCanvas';
+import { SimLink } from './sim/simulator';
+import { DevicePanel, NodePanel, RoomPanel, ZonePanel } from './ui/Panels';
+
+export default function App() {
+  const [config, setConfig] = useState<RoomConfig>(() => loadLocal());
+  const [link, setLink] = useState<DeviceLink | null>(null);
+  const [tracks, setTracks] = useState<Track[]>([]);
+  const [zoneStates, setZoneStates] = useState<Map<number, ZoneState>>(new Map());
+  const [status, setStatus] = useState<NodeStatus | null>(null);
+  const [selected, setSelected] = useState<Selection>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [dirty, setDirty] = useState(false);
+
+  const configRef = useRef(config);
+  configRef.current = config;
+
+  useEffect(() => saveLocal(config), [config]);
+
+  const wire = useCallback((l: DeviceLink) => {
+    l.onTracks((f) => setTracks(f.tracks));
+    l.onZoneState((zs) => setZoneStates(new Map(zs.map((z) => [z.index, z]))));
+    l.onStatus(setStatus);
+    l.onDisconnected(() => {
+      setLink(null);
+      setTracks([]);
+      setZoneStates(new Map());
+    });
+  }, []);
+
+  async function connectBle() {
+    setError(null);
+    const l = new BleLink();
+    wire(l);
+    try {
+      await l.connect();
+      setLink(l);
+
+      // Adopt whatever the device already holds, so a fresh browser does not
+      // silently overwrite a working room with an empty local default.
+      const remote = await l.readConfig();
+      if (remote && validateConfig(remote)) {
+        setConfig(remote);
+        setDirty(false);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  async function connectSim() {
+    setError(null);
+    const l = new SimLink(configRef.current);
+    wire(l);
+    await l.connect();
+    setLink(l);
+  }
+
+  // Keep the simulator's copy of the rules current as they are edited.
+  useEffect(() => {
+    if (link instanceof SimLink) link.setConfig(config);
+  }, [config, link]);
+
+  function disconnect() {
+    link?.disconnect();
+    setLink(null);
+  }
+
+  async function pushConfig() {
+    if (!link) return;
+    setError(null);
+    const next = withBumpedVersion(config);
+    try {
+      await link.writeConfig(next);
+      setConfig(next);
+      setDirty(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  const update = useCallback((c: RoomConfig) => {
+    setConfig(c);
+    setDirty(true);
+  }, []);
+
+  function addZone() {
+    const id = `z${Date.now().toString(36).slice(-5)}`;
+    update({
+      ...config,
+      zones: [
+        ...config.zones,
+        newZone(id, config.room.w_mm / 2, config.room.h_mm / 2),
+      ],
+    });
+    setSelected({ kind: 'zone', id });
+  }
+
+  function addNodeManually() {
+    const id = `node${config.nodes.length + 1}`;
+    update({
+      ...config,
+      nodes: [
+        ...config.nodes,
+        { id, x_mm: 0, y_mm: 0, theta_deg: 45, enabled: true },
+      ],
+    });
+    setSelected({ kind: 'node', id });
+  }
+
+  function exportJson() {
+    const blob = new Blob([JSON.stringify(config, null, 2)], {
+      type: 'application/json',
+    });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'room-config.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+
+  function importJson(file: File) {
+    file.text().then((text) => {
+      try {
+        const parsed: unknown = JSON.parse(text);
+        if (validateConfig(parsed)) {
+          update(parsed);
+        } else {
+          setError('That file is not a valid room configuration.');
+        }
+      } catch {
+        setError('Could not parse that file as JSON.');
+      }
+    });
+  }
+
+  const selectedZone = useMemo(
+    () =>
+      selected?.kind === 'zone'
+        ? config.zones.find((z) => z.id === selected.id)
+        : undefined,
+    [selected, config.zones],
+  );
+  const selectedNode = useMemo(
+    () =>
+      selected?.kind === 'node'
+        ? config.nodes.find((n) => n.id === selected.id)
+        : undefined,
+    [selected, config.nodes],
+  );
+
+  const noBluetooth = !bluetoothAvailable();
+
+  return (
+    <div className="app">
+      <header>
+        <h1>Room Tracker</h1>
+        <div className="actions">
+          {link ? (
+            <>
+              <span className="badge ok">{link.label}</span>
+              <button onClick={pushConfig} disabled={!dirty}>
+                {dirty ? 'Push config to device' : 'Config in sync'}
+              </button>
+              <button onClick={disconnect}>Disconnect</button>
+            </>
+          ) : (
+            <>
+              <button onClick={connectBle} disabled={noBluetooth}>
+                Connect sensor
+              </button>
+              <button onClick={connectSim}>Run simulator</button>
+            </>
+          )}
+        </div>
+      </header>
+
+      {noBluetooth && !link && (
+        <div className="notice">
+          This browser has no Web Bluetooth support. Use Chrome or Edge on
+          desktop, or Chrome on Android — iOS Safari and Firefox cannot connect
+          to the sensors. The simulator works everywhere.
+        </div>
+      )}
+      {error && <div className="notice error">{error}</div>}
+
+      <main>
+        <div className="canvas-wrap">
+          <RoomCanvas
+            config={config}
+            tracks={tracks}
+            zoneStates={zoneStates}
+            selected={selected}
+            onSelect={setSelected}
+            onChange={update}
+          />
+        </div>
+
+        <aside>
+          <div className="toolbar">
+            <button onClick={addZone}>+ Event box</button>
+            <button onClick={addNodeManually}>+ Sensor</button>
+            <button onClick={exportJson}>Export</button>
+            <label className="file-btn">
+              Import
+              <input
+                type="file"
+                accept="application/json"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) importJson(f);
+                  e.target.value = '';
+                }}
+              />
+            </label>
+          </div>
+
+          <RoomPanel config={config} onChange={update} />
+
+          {selectedZone && (
+            <ZonePanel
+              zone={selectedZone}
+              config={config}
+              onChange={update}
+              onDelete={() => {
+                update({
+                  ...config,
+                  zones: config.zones.filter((z) => z.id !== selectedZone.id),
+                });
+                setSelected(null);
+              }}
+            />
+          )}
+
+          {selectedNode && (
+            <NodePanel node={selectedNode} config={config} onChange={update} />
+          )}
+
+          <DevicePanel status={status} configVersion={config.version} />
+        </aside>
+      </main>
+    </div>
+  );
+}

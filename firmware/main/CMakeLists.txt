@@ -1,0 +1,21 @@
+idf_component_register(
+    SRCS
+        "app_main.c"
+        "ld2450.c"
+        "fusion.c"
+        "zones.c"
+        "config.c"
+        "actions.c"
+        "ble_gatt.c"
+        "espnow_link.c"
+    INCLUDE_DIRS "."
+    REQUIRES
+        driver
+        esp_timer
+        nvs_flash
+        json
+        bt
+        esp_wifi
+        esp_netif
+        esp_event
+)
