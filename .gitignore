@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+
+# Web build output (built and deployed by .github/workflows/deploy.yml)
+dist/
+*.tsbuildinfo
+
+# ESP-IDF firmware build output
+firmware/build/
+firmware/test/build/
+sdkconfig
+sdkconfig.old
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
