@@ -1,12 +1,11 @@
-/* NimBLE GATT server: the webpage's only interface to a node.
+/* NimBLE GATT server: the webpage's only interface to the board.
  *
- * The browser connects to ONE node at a time. That node serves the fused room
- * state, its own config, and the peer list gathered from ESP-NOW heartbeats. */
+ * One board per room, so the browser talks to exactly one of these and it
+ * serves the whole room: track state, zone outputs, and its own config. */
 #ifndef BLE_GATT_H
 #define BLE_GATT_H
 
 #include "config.h"
-#include "espnow_link.h"
 #include "room_types.h"
 #include "zones.h"
 
@@ -35,7 +34,7 @@ void ble_gatt_init(const char *device_name, const ble_gatt_cbs_t *cbs);
 /* Publish the current config so CONFIG_READ can serve it. */
 void ble_gatt_set_config_json(const char *json, size_t len);
 
-/* Fused room state, ~10 Hz while a client is subscribed. */
+/* Room track state, ~10 Hz while a client is subscribed. */
 void ble_gatt_notify_tracks(const track_t *tracks, uint8_t count, uint32_t seq);
 
 /* Zone outputs, sent only on change. */
@@ -45,8 +44,7 @@ void ble_gatt_notify_zone_state(const zone_cfg_t *zones,
 /* Refresh the STATUS payload (served as JSON; read or notify). */
 void ble_gatt_set_status(const char *node_id, const char *name,
                          uint32_t config_version, uint32_t uptime_s,
-                         bool config_mode, const peer_info_t *peers,
-                         uint8_t peer_count, uint32_t now_ms);
+                         bool config_mode);
 
 bool ble_gatt_is_connected(void);
 

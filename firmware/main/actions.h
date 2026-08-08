@@ -7,10 +7,9 @@
 
 #include "config.h"
 
-/* self_node_id identifies this board. Actions naming a different node are
- * ignored here — zones are room-level objects, but a GPIO pin lives on one
- * specific board. */
-void actions_init(const room_config_t *cfg, const char *self_node_id);
+/* Claims every GPIO named by a zone action. One board per room, so every
+ * action in the config belongs to this one. */
+void actions_init(const room_config_t *cfg);
 
 /* Apply a zone's output change. zone_index must match the zone's position in
  * the config, and is used to arbitrate pins driven by more than one zone. */

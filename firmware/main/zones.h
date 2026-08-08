@@ -38,7 +38,6 @@ typedef enum {
 
 typedef struct {
     action_type_t type;
-    char          node_id[ROOM_ID_LEN];  /* which board owns the pin */
     uint8_t       pin;
     uint8_t       active_level;          /* 0 or 1 */
     bool          pulse;                 /* true = pulse, false = latch */

@@ -12,7 +12,7 @@ import {
 } from './model/config';
 import { RoomCanvas, type Selection } from './render/RoomCanvas';
 import { SimLink } from './sim/simulator';
-import { DevicePanel, NodePanel, RoomPanel, ZonePanel } from './ui/Panels';
+import { DevicePanel, RoomPanel, SensorPanel, ZonePanel } from './ui/Panels';
 
 export default function App() {
   const [config, setConfig] = useState<RoomConfig>(() => loadLocal());
@@ -108,18 +108,6 @@ export default function App() {
     setSelected({ kind: 'zone', id });
   }
 
-  function addNodeManually() {
-    const id = `node${config.nodes.length + 1}`;
-    update({
-      ...config,
-      nodes: [
-        ...config.nodes,
-        { id, x_mm: 0, y_mm: 0, theta_deg: 45, enabled: true },
-      ],
-    });
-    setSelected({ kind: 'node', id });
-  }
-
   function exportJson() {
     const blob = new Blob([JSON.stringify(config, null, 2)], {
       type: 'application/json',
@@ -152,13 +140,6 @@ export default function App() {
         ? config.zones.find((z) => z.id === selected.id)
         : undefined,
     [selected, config.zones],
-  );
-  const selectedNode = useMemo(
-    () =>
-      selected?.kind === 'node'
-        ? config.nodes.find((n) => n.id === selected.id)
-        : undefined,
-    [selected, config.nodes],
   );
 
   const noBluetooth = !bluetoothAvailable();
@@ -211,7 +192,6 @@ export default function App() {
         <aside>
           <div className="toolbar">
             <button onClick={addZone}>+ Event box</button>
-            <button onClick={addNodeManually}>+ Sensor</button>
             <button onClick={exportJson}>Export</button>
             <label className="file-btn">
               Import
@@ -244,8 +224,8 @@ export default function App() {
             />
           )}
 
-          {selectedNode && (
-            <NodePanel node={selectedNode} config={config} onChange={update} />
+          {selected?.kind === 'sensor' && (
+            <SensorPanel config={config} onChange={update} />
           )}
 
           <DevicePanel status={status} configVersion={config.version} />

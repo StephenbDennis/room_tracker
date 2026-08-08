@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { pointInRect, rectCorners, sensorToRoom } from '../model/geometry';
-import type { NodePose, ZoneRect } from '../model/config';
+import type { SensorPose, ZoneRect } from '../model/config';
 
 const rect = (o: Partial<ZoneRect> = {}): ZoneRect => ({
   cx: 2000,
@@ -11,12 +11,10 @@ const rect = (o: Partial<ZoneRect> = {}): ZoneRect => ({
   ...o,
 });
 
-const pose = (x: number, y: number, theta: number): NodePose => ({
-  id: 'n',
+const pose = (x: number, y: number, theta: number): SensorPose => ({
   x_mm: x,
   y_mm: y,
   theta_deg: theta,
-  enabled: true,
 });
 
 describe('pointInRect', () => {

@@ -1,4 +1,4 @@
-import type { NodePose, ZoneRect } from './config';
+import type { SensorPose, ZoneRect } from './config';
 
 /* Room frame: origin at a corner, millimetres, +x right, +y up in plan view. */
 
@@ -47,7 +47,7 @@ export function rectCorners(r: ZoneRect): Pt[] {
 }
 
 /** Mirrors fusion_transform(): sensor-local +y is forward, +x is right. */
-export function sensorToRoom(pose: NodePose, lx: number, ly: number): Pt {
+export function sensorToRoom(pose: SensorPose, lx: number, ly: number): Pt {
   const a = rad(pose.theta_deg);
   const c = Math.cos(a);
   const s = Math.sin(a);
@@ -61,7 +61,7 @@ export function sensorToRoom(pose: NodePose, lx: number, ly: number): Pt {
 export const SENSOR_FOV_DEG = 60;
 export const SENSOR_RANGE_MM = 6000;
 
-export function sensorWedge(pose: NodePose, steps = 16): Pt[] {
+export function sensorWedge(pose: SensorPose, steps = 16): Pt[] {
   const pts: Pt[] = [{ x: pose.x_mm, y: pose.y_mm }];
   for (let i = 0; i <= steps; i++) {
     const t = -SENSOR_FOV_DEG + (2 * SENSOR_FOV_DEG * i) / steps;

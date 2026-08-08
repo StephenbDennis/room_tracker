@@ -5,7 +5,7 @@ import { pointInRect, rectCorners, sensorWedge, type Pt } from '../model/geometr
 
 export type Selection =
   | { kind: 'zone'; id: string }
-  | { kind: 'node'; id: string }
+  | { kind: 'sensor' }
   | null;
 
 interface Props {
@@ -51,7 +51,7 @@ const toWorld = (v: View, sx: number, sy: number): Pt => ({
 type DragKind =
   | { type: 'zone-move'; id: string; dx: number; dy: number }
   | { type: 'zone-resize'; id: string }
-  | { type: 'node-move'; id: string; dx: number; dy: number }
+  | { type: 'sensor-move'; dx: number; dy: number }
   | null;
 
 export function RoomCanvas({
@@ -118,10 +118,9 @@ export function RoomCanvas({
       }
     }
 
-    for (const n of config.nodes) {
-      if (Math.hypot(wx - n.x_mm, wy - n.y_mm) < tol * 2.2) {
-        return { sel: { kind: 'node', id: n.id }, resize: false };
-      }
+    const s = config.sensor;
+    if (Math.hypot(wx - s.x_mm, wy - s.y_mm) < tol * 2.2) {
+      return { sel: { kind: 'sensor' }, resize: false };
     }
     return { sel: null, resize: false };
   }
@@ -142,12 +141,10 @@ export function RoomCanvas({
         ? { type: 'zone-resize', id: sel.id }
         : { type: 'zone-move', id: sel.id, dx: w.x - z.rect.cx, dy: w.y - z.rect.cy };
     } else {
-      const n = config.nodes.find((x) => x.id === sel.id)!;
       drag.current = {
-        type: 'node-move',
-        id: sel.id,
-        dx: w.x - n.x_mm,
-        dy: w.y - n.y_mm,
+        type: 'sensor-move',
+        dx: w.x - config.sensor.x_mm,
+        dy: w.y - config.sensor.y_mm,
       };
     }
   }
@@ -179,12 +176,10 @@ export function RoomCanvas({
           return { ...z, rect: { ...z.rect, w: w2, h: h2 } };
         }),
       });
-    } else if (d.type === 'node-move') {
+    } else if (d.type === 'sensor-move') {
       onChange({
         ...config,
-        nodes: config.nodes.map((n) =>
-          n.id === d.id ? { ...n, x_mm: w.x - d.dx, y_mm: w.y - d.dy } : n,
-        ),
+        sensor: { ...config.sensor, x_mm: w.x - d.dx, y_mm: w.y - d.dy },
       });
     }
   }
@@ -248,10 +243,9 @@ function draw(
   ctx.lineWidth = 2;
   ctx.strokeRect(tl.x, tl.y, cfg.room.w_mm * v.scale, cfg.room.h_mm * v.scale);
 
-  // sensor coverage wedges, drawn under everything else
-  for (const n of cfg.nodes) {
-    if (!n.enabled) continue;
-    const pts = sensorWedge(n).map((p) => toScreen(v, p));
+  // sensor coverage wedge, drawn under everything else
+  {
+    const pts = sensorWedge(cfg.sensor).map((p) => toScreen(v, p));
     ctx.beginPath();
     ctx.moveTo(pts[0].x, pts[0].y);
     for (const p of pts.slice(1)) ctx.lineTo(p.x, p.y);
@@ -294,14 +288,15 @@ function draw(
     }
   });
 
-  // sensors
-  for (const n of cfg.nodes) {
+  // sensor
+  {
+    const n = cfg.sensor;
     const p = toScreen(v, { x: n.x_mm, y: n.y_mm });
-    const sel = selected?.kind === 'node' && selected.id === n.id;
+    const sel = selected?.kind === 'sensor';
 
     ctx.beginPath();
     ctx.arc(p.x, p.y, sel ? 10 : 7, 0, Math.PI * 2);
-    ctx.fillStyle = n.enabled ? '#5aa0ff' : '#5a6474';
+    ctx.fillStyle = '#5aa0ff';
     ctx.fill();
     ctx.strokeStyle = '#0e1117';
     ctx.lineWidth = 2;
@@ -315,11 +310,6 @@ function draw(
     ctx.strokeStyle = '#5aa0ff';
     ctx.lineWidth = 2;
     ctx.stroke();
-
-    ctx.fillStyle = '#93a4bd';
-    ctx.font = '11px ui-sans-serif, system-ui, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(n.id, p.x, p.y + 22);
   }
 
   // tracked people

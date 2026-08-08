@@ -7,15 +7,14 @@ idf_component_register(
         "config.c"
         "actions.c"
         "ble_gatt.c"
-        "espnow_link.c"
     INCLUDE_DIRS "."
     REQUIRES
-        driver
         esp_timer
         nvs_flash
-        json
         bt
-        esp_wifi
-        esp_netif
-        esp_event
+    # IDF v6.0 split the monolithic `driver` component; UART and GPIO now come
+    # from their own components and are only used from .c files here.
+    PRIV_REQUIRES
+        esp_driver_uart
+        esp_driver_gpio
 )

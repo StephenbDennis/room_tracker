@@ -9,13 +9,12 @@ export type CountOp = '>=' | '==' | '<=';
 export type UntriggerMode = 'conditions_unmet' | 'timer';
 export type ActionMode = 'latch' | 'pulse';
 
-export interface NodePose {
-  id: string;
+/** Where the room's one sensor sits. */
+export interface SensorPose {
   x_mm: number;
   y_mm: number;
   /** Boresight bearing, counter-clockwise from room +x. */
   theta_deg: number;
-  enabled: boolean;
 }
 
 export interface ZoneRect {
@@ -28,8 +27,6 @@ export interface ZoneRect {
 
 export interface GpioAction {
   type: 'gpio';
-  /** Zones are room-level, but a pin lives on one specific board. */
-  node_id: string;
   pin: number;
   active_level: 0 | 1;
   mode: ActionMode;
@@ -62,7 +59,6 @@ export interface Zone {
 }
 
 export interface FusionCfg {
-  merge_radius_mm: number;
   assoc_gate_mm: number;
   coast_ms: number;
   moving_thresh_mms: number;
@@ -73,17 +69,15 @@ export interface FusionCfg {
 export interface RoomConfig {
   version: number;
   room: { w_mm: number; h_mm: number };
-  nodes: NodePose[];
+  sensor: SensorPose;
   zones: Zone[];
   fusion: FusionCfg;
 }
 
-export const MAX_NODES = 8;
 export const MAX_ZONES = 16;
 
 export function defaultFusion(): FusionCfg {
   return {
-    merge_radius_mm: 500,
     assoc_gate_mm: 800,
     coast_ms: 1000,
     moving_thresh_mms: 100,
@@ -96,7 +90,9 @@ export function defaultConfig(): RoomConfig {
   return {
     version: 1,
     room: { w_mm: 5000, h_mm: 4000 },
-    nodes: [],
+    // Centred on the lower wall looking into the room: the commonest mounting
+    // spot, and a placement the user can drag rather than having to invent.
+    sensor: { x_mm: 2500, y_mm: 0, theta_deg: 90 },
     zones: [],
     fusion: defaultFusion(),
   };
@@ -125,7 +121,7 @@ export function newZone(id: string, cx: number, cy: number): Zone {
   };
 }
 
-/** Bump the version on every write so nodes can report drift. */
+/** Bump the version on every write so the board can report drift. */
 export function withBumpedVersion(cfg: RoomConfig): RoomConfig {
   return { ...cfg, version: cfg.version + 1 };
 }
@@ -139,12 +135,12 @@ export function validateConfig(cfg: unknown): cfg is RoomConfig {
   if (!c.room || typeof c.room.w_mm !== 'number' || typeof c.room.h_mm !== 'number') {
     return false;
   }
-  if (!Array.isArray(c.nodes) || !Array.isArray(c.zones)) return false;
-  for (const n of c.nodes) {
-    if (typeof n.id !== 'string') return false;
-    if (typeof n.x_mm !== 'number' || typeof n.y_mm !== 'number') return false;
-    if (typeof n.theta_deg !== 'number') return false;
+  if (!Array.isArray(c.zones)) return false;
+  if (!c.sensor) return false;
+  if (typeof c.sensor.x_mm !== 'number' || typeof c.sensor.y_mm !== 'number') {
+    return false;
   }
+  if (typeof c.sensor.theta_deg !== 'number') return false;
   for (const z of c.zones) {
     if (typeof z.id !== 'string' || !z.rect) return false;
     if (typeof z.rect.cx !== 'number' || typeof z.rect.w !== 'number') return false;

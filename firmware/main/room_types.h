@@ -8,7 +8,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define ROOM_MAX_NODES    8
 #define ROOM_MAX_TRACKS   12
 #define ROOM_MAX_ZONES    16
 #define ROOM_ID_LEN       16
@@ -33,7 +32,7 @@ static inline uint8_t motion_to_mask(motion_state_t s)
     }
 }
 
-/* A fused person-sized object in room coordinates. */
+/* A tracked person-sized object in room coordinates. */
 typedef struct {
     uint8_t        id;         /* stable while the track lives; reused after expiry */
     float          x_mm;
@@ -44,14 +43,13 @@ typedef struct {
     bool           active;
 } track_t;
 
-/* Where a sensor sits in the room. theta_deg is the boresight bearing measured
- * counter-clockwise from room +x. */
+/* Where the room's sensor sits. theta_deg is the boresight bearing measured
+ * counter-clockwise from room +x. One sensor per room, so this is a single
+ * value in the config rather than a table keyed by board id. */
 typedef struct {
-    char  id[ROOM_ID_LEN];
     float x_mm;
     float y_mm;
     float theta_deg;
-    bool  enabled;
-} node_pose_t;
+} sensor_pose_t;
 
 #endif /* ROOM_TYPES_H */

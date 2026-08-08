@@ -6,15 +6,21 @@ must stay in step:
 | Layer | Files |
 |---|---|
 | Radar UART | `firmware/main/ld2450.c` |
-| BLE GATT | `firmware/main/ble_gatt.c`, `web/src/ble/codec.ts` |
-| ESP-NOW | `firmware/main/espnow_link.c` |
-| Config JSON | `firmware/main/config.c`, `web/src/model/config.ts` |
+| BLE GATT | `firmware/main/ble_gatt.c`, `docs/src/ble/codec.ts` |
+| Config JSON | `firmware/main/config.c`, `docs/src/model/config.ts` |
 
 ---
 
 ## 1. HLK-LD2450 UART
 
-`256000` baud, 8N1, 10 frames/second.
+`256000` baud, 8N1, 10 frames/second — the datasheet default.
+
+Baud is a persistent module setting, so a reconfigured unit can differ, and
+`LD2450_BAUD` in `firmware/main/ld2450.h` must match whatever the module is
+actually set to. A mismatch is silent — the parser simply never frames, and the
+room reads as permanently empty. `ld2450_parser_t` counts `frames_ok` and
+`bytes_discarded` for exactly this case; logging them separates a wrong baud
+from a radar that genuinely sees nobody.
 
 ### Target frame — 30 bytes
 
@@ -83,8 +89,7 @@ itself, or the footer.
 
 Every command must be bracketed by enable/end configuration. At boot the
 firmware selects multi-target mode and **disables the module's own Bluetooth** —
-it is a needless 2.4 GHz emitter competing with a radio that already has BLE and
-ESP-NOW to schedule.
+it is a needless 2.4 GHz emitter competing with the ESP32's own BLE radio.
 
 ---
 
@@ -125,7 +130,7 @@ This carries the **fused** room state, not one sensor's raw targets.
 
 ### STATUS — read / notify, 1 Hz
 
-JSON, because the peer list is variable-length and read rarely:
+JSON, because it is read rarely and legibility beats compactness:
 
 ```json
 {
@@ -133,16 +138,11 @@ JSON, because the peer list is variable-length and read rarely:
   "name": "node-a1b2c3",
   "config_version": 7,
   "uptime_s": 4210,
-  "config_mode": true,
-  "peers": [
-    { "id": "d4e5f6", "name": "node-d4e5f6",
-      "config_version": 5, "age_ms": 220, "rssi": -58 }
-  ]
+  "config_mode": true
 }
 ```
 
-`peers[].config_version` is what lets the UI flag a node the user forgot to
-update. `age_ms` above ~15000 means the node has gone quiet.
+`config_version` is what lets the UI flag an edit that never reached the board.
 
 ### CONFIG_WRITE / CONFIG_READ — chunked
 
@@ -177,54 +177,16 @@ mode**: the first 5 minutes after boot, or while the BOOT button is held.
 
 ---
 
-## 3. ESP-NOW
-
-Fixed channel (default 6), broadcast address, no association. All packets share
-a header:
-
-```c
-struct { uint16_t magic /* 0x4C44 */; uint8_t version; uint8_t type;
-         char node_id[16]; }
-```
-
-### Type 1 — heartbeat, every 3 s
-
-Adds `config_version u32`, `uptime_s u32`, `name[24]`. This is how a node the
-browser is *not* connected to still shows up in the device list.
-
-### Type 2 — detections, 10 Hz
-
-Adds `seq u32`, `count u8`, then up to 3 of:
-
-```c
-struct { int16_t x_mm; int16_t y_mm; int16_t speed_cms; uint16_t range_mm; }
-```
-
-Positions are already in **room coordinates** — each node transforms its own
-targets before broadcasting, so receivers need no knowledge of the sender's
-pose. Detections older than 300 ms are ignored, which is what stops a dead node
-freezing phantom targets in the room.
-
-**Configuration is deliberately not distributed over ESP-NOW.** The user
-configures one node at a time over BLE; heartbeats surface the resulting version
-drift as a visible badge rather than a silent inconsistency. This removes
-fragmentation, ACK and retry logic from the firmware entirely.
-
----
-
-## 4. Room configuration JSON
+## 3. Room configuration JSON
 
 Mirrors `room_config_t` (`firmware/main/config.h`) and `RoomConfig`
-(`web/src/model/config.ts`).
+(`docs/src/model/config.ts`).
 
 ```jsonc
 {
   "version": 7,
   "room": { "w_mm": 5000, "h_mm": 4000 },
-  "nodes": [
-    { "id": "a1b2c3", "x_mm": 0, "y_mm": 0,
-      "theta_deg": 45, "enabled": true }
-  ],
+  "sensor": { "x_mm": 2500, "y_mm": 0, "theta_deg": 90 },
   "zones": [
     {
       "id": "z1", "name": "desk", "enabled": true,
@@ -241,13 +203,13 @@ Mirrors `room_config_t` (`firmware/main/config.h`) and `RoomConfig`
         "max_on_ms": 0
       },
       "actions": [
-        { "type": "gpio", "node_id": "a1b2c3", "pin": 12,
+        { "type": "gpio", "pin": 12,
           "active_level": 1, "mode": "latch", "pulse_ms": 0 }
       ]
     }
   ],
   "fusion": {
-    "merge_radius_mm": 500, "assoc_gate_mm": 800, "coast_ms": 1000,
+    "assoc_gate_mm": 800, "coast_ms": 1000,
     "moving_thresh_mms": 100, "stopped_thresh_mms": 50,
     "stopped_hold_ms": 1000
   }
@@ -256,17 +218,16 @@ Mirrors `room_config_t` (`firmware/main/config.h`) and `RoomConfig`
 
 Notes:
 
-- **`theta_deg`** is the boresight bearing counter-clockwise from room +x.
-- **`action.node_id`** matters: zones are room-level objects, but a GPIO pin
-  lives on one specific board. Nodes ignore actions addressed elsewhere.
+- **`sensor`** is a single object, not a list: one sensor per room. Its
+  `theta_deg` is the boresight bearing counter-clockwise from room +x.
 - **`on_delay_ms`** debounces entry. Without it, one jittery frame at a boundary
   fires the output.
 - **`max_on_ms`** is a safety cap. After it fires, the zone stays suppressed
   until the conditions clear at least once — otherwise a still-present target
   would immediately re-trigger and oscillate forever. The same suppression
   applies after a `timer`-mode release.
-- Node display names are **not** in this schema. The firmware reports its own
-  name via STATUS; the web app keeps any user-assigned label locally.
+- The board's display name is **not** in this schema. The firmware reports its
+  own name via STATUS; the web app keeps any user-assigned label locally.
 
 ### Zone state machine
 
@@ -284,5 +245,5 @@ RELEASING cancels the release, which is what stops someone pacing a boundary
 from chattering the output.
 
 Authoritative implementation: `firmware/main/zones.c`, under host test in
-`firmware/test/test_zones.c`. `web/src/sim/zoneEngine.ts` mirrors it for the
+`firmware/test/test_zones.c`. `docs/src/sim/zoneEngine.ts` mirrors it for the
 offline simulator; if the two disagree, the firmware is right.

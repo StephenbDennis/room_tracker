@@ -157,15 +157,6 @@ export class SimLink implements DeviceLink {
         config_version: this.cfg.version,
         uptime_s: Math.floor(this.t / 1000),
         config_mode: true,
-        peers: [
-          {
-            id: 'sim0002',
-            name: 'sim-peer',
-            config_version: this.cfg.version,
-            age_ms: 200,
-            rssi: -54,
-          },
-        ],
       });
     }
   }

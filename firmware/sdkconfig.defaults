@@ -15,15 +15,11 @@ CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
 CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=517
 CONFIG_BT_NIMBLE_GATT_MAX_PROCS=8
 
-# --- WiFi / ESP-NOW ---
-# WiFi is initialised but never associated; ESP-NOW rides on a fixed channel.
-CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=8
-CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
-
-# --- BLE / WiFi coexistence ---
-# Both share one radio on the S3. Software coexistence is required or the
-# 10 Hz notify stream and the ESP-NOW broadcasts will starve each other.
-CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y
+# --- WiFi ---
+# Nothing uses the WiFi radio: one board per room, so there are no peers to
+# talk to and BLE is the only link. Leaving it out frees the radio entirely,
+# so no BLE/WiFi coexistence scheduling is needed either.
+CONFIG_ESP_WIFI_ENABLED=n
 
 # --- UART ---
 # 256000 baud from the LD2450; the default REF_TICK source cannot divide to it

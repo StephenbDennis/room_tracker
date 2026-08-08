@@ -11,6 +11,10 @@ firmware/test/build/
 sdkconfig
 sdkconfig.old
 
+# Component manager fetches these from the registry; dependencies.lock is
+# committed so the pinned versions are reproducible.
+firmware/managed_components/
+
 # Editor / OS
 .vscode/
 .idea/

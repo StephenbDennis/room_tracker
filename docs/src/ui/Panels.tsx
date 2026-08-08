@@ -1,8 +1,8 @@
 import type {
   CountOp,
   MotionState,
-  NodePose,
   RoomConfig,
+  SensorPose,
   UntriggerMode,
   Zone,
 } from '../model/config';
@@ -56,30 +56,26 @@ export function RoomPanel({
   );
 }
 
-export function NodePanel({
-  node,
+export function SensorPanel({
   config,
   onChange,
 }: {
-  node: NodePose;
   config: RoomConfig;
   onChange: (c: RoomConfig) => void;
 }) {
-  const patch = (p: Partial<NodePose>) =>
-    onChange({
-      ...config,
-      nodes: config.nodes.map((n) => (n.id === node.id ? { ...n, ...p } : n)),
-    });
+  const sensor = config.sensor;
+  const patch = (p: Partial<SensorPose>) =>
+    onChange({ ...config, sensor: { ...sensor, ...p } });
 
   return (
     <section className="panel">
-      <h3>Sensor {node.id}</h3>
+      <h3>Sensor</h3>
       <div className="row">
         <label>
           x (mm)
           <input
             type="number"
-            value={Math.round(node.x_mm)}
+            value={Math.round(sensor.x_mm)}
             onChange={(e) => patch({ x_mm: num(e.target.value, 0) })}
           />
         </label>
@@ -87,7 +83,7 @@ export function NodePanel({
           y (mm)
           <input
             type="number"
-            value={Math.round(node.y_mm)}
+            value={Math.round(sensor.y_mm)}
             onChange={(e) => patch({ y_mm: num(e.target.value, 0) })}
           />
         </label>
@@ -98,18 +94,10 @@ export function NodePanel({
           type="range"
           min={0}
           max={359}
-          value={Math.round(node.theta_deg)}
+          value={Math.round(sensor.theta_deg)}
           onChange={(e) => patch({ theta_deg: num(e.target.value, 0) })}
         />
-        <span className="mono">{Math.round(node.theta_deg)}&deg;</span>
-      </label>
-      <label className="check">
-        <input
-          type="checkbox"
-          checked={node.enabled}
-          onChange={(e) => patch({ enabled: e.target.checked })}
-        />
-        Enabled
+        <span className="mono">{Math.round(sensor.theta_deg)}&deg;</span>
       </label>
       <p className="hint">Drag the sensor on the plan to reposition it.</p>
     </section>
@@ -303,23 +291,6 @@ export function ZonePanel({
       {zone.actions.map((a, i) => (
         <div className="row action" key={i}>
           <label>
-            Node
-            <select
-              value={a.node_id}
-              onChange={(e) => {
-                const actions = [...zone.actions];
-                actions[i] = { ...a, node_id: e.target.value };
-                patch({ actions });
-              }}
-            >
-              {config.nodes.map((n) => (
-                <option key={n.id} value={n.id}>
-                  {n.id}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
             GPIO
             <input
               type="number"
@@ -362,7 +333,6 @@ export function ZonePanel({
               ...zone.actions,
               {
                 type: 'gpio',
-                node_id: config.nodes[0]?.id ?? '',
                 pin: 12,
                 active_level: 1,
                 mode: 'latch',
@@ -371,7 +341,6 @@ export function ZonePanel({
             ],
           })
         }
-        disabled={config.nodes.length === 0}
       >
         + GPIO action
       </button>
@@ -402,64 +371,31 @@ export function DevicePanel({
   if (!status) {
     return (
       <section className="panel">
-        <h3>Devices</h3>
+        <h3>Device</h3>
         <p className="hint">Not connected.</p>
       </section>
     );
   }
 
-  // Nodes are configured one at a time, so version drift is the expected
-  // failure mode. Surfacing it here turns a silent inconsistency into a badge.
-  const rows = [
-    {
-      id: status.node_id,
-      name: status.name,
-      version: status.config_version,
-      age: 0,
-      rssi: null as number | null,
-      connected: true,
-    },
-    ...status.peers.map((p) => ({
-      id: p.id,
-      name: p.name,
-      version: p.config_version,
-      age: p.age_ms,
-      rssi: p.rssi,
-      connected: false,
-    })),
-  ];
+  // The board persists its own copy, so an edit that never reached it leaves
+  // the page showing a room the hardware is not actually running.
+  const drift = status.config_version !== configVersion;
 
   return (
     <section className="panel">
-      <h3>Devices</h3>
+      <h3>Device</h3>
       <table className="devices">
         <tbody>
-          {rows.map((r) => {
-            const stale = r.age > 15000;
-            const drift = r.version !== configVersion;
-            return (
-              <tr key={r.id}>
-                <td>
-                  <span
-                    className={
-                      stale ? 'dot dot-gone' : drift ? 'dot dot-warn' : 'dot dot-ok'
-                    }
-                  />
-                </td>
-                <td className="mono">{r.name || r.id}</td>
-                <td className="mono">v{r.version}</td>
-                <td className="hint">
-                  {r.connected
-                    ? 'connected'
-                    : stale
-                      ? `not seen ${Math.round(r.age / 1000)}s`
-                      : drift
-                        ? 'config out of date'
-                        : `in range ${r.rssi ?? ''}dBm`}
-                </td>
-              </tr>
-            );
-          })}
+          <tr>
+            <td>
+              <span className={drift ? 'dot dot-warn' : 'dot dot-ok'} />
+            </td>
+            <td className="mono">{status.name || status.node_id}</td>
+            <td className="mono">v{status.config_version}</td>
+            <td className="hint">
+              {drift ? 'unsaved changes' : `up ${Math.round(status.uptime_s)}s`}
+            </td>
+          </tr>
         </tbody>
       </table>
     </section>

@@ -19,8 +19,7 @@ typedef struct {
     float        room_w_mm;
     float        room_h_mm;
 
-    node_pose_t  nodes[ROOM_MAX_NODES];
-    uint8_t      node_count;
+    sensor_pose_t sensor;
 
     zone_cfg_t   zones[ROOM_MAX_ZONES];
     uint8_t      zone_count;
@@ -30,9 +29,6 @@ typedef struct {
 
 /* An empty 5 x 4 m room with tuning defaults and no zones. */
 void config_defaults(room_config_t *cfg);
-
-/* Index of a node by id string, or -1. */
-int config_find_node(const room_config_t *cfg, const char *node_id);
 
 /* JSON codec. Returns false / 0 on malformed input or insufficient capacity.
  * The schema is documented in docs/protocol.md. */
