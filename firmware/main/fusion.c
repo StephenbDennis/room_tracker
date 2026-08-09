@@ -92,7 +92,12 @@ static void classify_motion(const fusion_cfg_t *cfg, fusion_track_t *tr,
         if ((uint32_t)(now_ms - tr->last_moving_ms) >= cfg->stopped_hold_ms) {
             tr->pub.motion = MOTION_STOPPED;
         }
-        /* Between the thresholds, hold the previous classification. */
+    } else if (tr->pub.motion == MOTION_UNKNOWN) {
+        /* Between the thresholds we hold the previous classification -- but a
+         * new track has none to hold, and a target that sits in the band never
+         * leaves it, so it would stay UNKNOWN for its whole life. It is above
+         * the stopped threshold, so call it moving. */
+        tr->pub.motion = MOTION_MOVING;
     }
 }
 

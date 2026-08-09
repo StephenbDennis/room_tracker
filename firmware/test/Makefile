@@ -14,7 +14,7 @@ LDLIBS  := -lm
 SRC     := ../main
 BUILD   := build
 
-SUITES  := ld2450 zones fusion
+SUITES  := ld2450 zones fusion integration
 
 BINS    := $(addprefix $(BUILD)/test_,$(SUITES))
 
@@ -31,6 +31,10 @@ $(BUILD)/test_zones: test_zones.c $(SRC)/zones.c | $(BUILD)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 $(BUILD)/test_fusion: test_fusion.c $(SRC)/fusion.c $(SRC)/ld2450.c | $(BUILD)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+
+# The one suite that links both, so the seam between them is covered.
+$(BUILD)/test_integration: test_integration.c $(SRC)/fusion.c $(SRC)/zones.c | $(BUILD)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 test: $(BINS)

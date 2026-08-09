@@ -41,7 +41,13 @@ uint8_t zone_count_matching(const zone_cfg_t *z, const track_t *tracks,
         if (!t->active) {
             continue;
         }
-        if ((motion_to_mask(t->motion) & z->state_mask) == 0) {
+        /* MOTION_MASK_ANY means the user does not care about motion state, so
+         * it has to admit a track the classifier has not resolved yet.
+         * motion_to_mask(MOTION_UNKNOWN) is 0, which fails every filter
+         * including this one, so without the first clause a person standing
+         * in a box is counted by nothing at all. */
+        if (z->state_mask != MOTION_MASK_ANY &&
+            (motion_to_mask(t->motion) & z->state_mask) == 0) {
             continue;
         }
         if (zone_contains_point(&z->rect, t->x_mm, t->y_mm)) {
