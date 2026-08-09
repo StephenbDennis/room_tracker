@@ -5,6 +5,7 @@ import { bluetoothAvailable, type DeviceLink } from './ble/link';
 import { Cmd } from './ble/uuids';
 import {
   loadLocal,
+  mergeNetworkDefaults,
   newZone,
   saveLocal,
   validateConfig,
@@ -63,8 +64,12 @@ export default function App() {
       // silently overwrite a working room with an empty local default.
       const remote = await l.readConfig();
       if (remote && validateConfig(remote)) {
-        setConfig(remote);
-        setDirty(false);
+        // A board fresh from a factory reset has no network settings. Fill in
+        // the ones remembered from the last board so the WiFi and broker do
+        // not have to be retyped for every room.
+        const merged = mergeNetworkDefaults(remote);
+        setConfig(merged);
+        setDirty(JSON.stringify(merged) !== JSON.stringify(remote));
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

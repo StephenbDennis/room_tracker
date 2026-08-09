@@ -105,7 +105,39 @@ static void publish_discovery(void)
         }
     }
 
-    ESP_LOGI(TAG, "published discovery for %u zone(s)", s_cfg.zone_count);
+    if (s_cfg.network.publish_tracks) {
+        char attrs[TOPIC_MAX];
+        snprintf(topic, sizeof topic, "%s/sensor/roomtrack_%s_people/config",
+                 s_cfg.network.discovery_prefix, s_node_id);
+        snprintf(state, sizeof state, "%s/%s/people/state",
+                 s_cfg.network.base_topic, s_node_id);
+        snprintf(attrs, sizeof attrs, "%s/%s/people/attributes",
+                 s_cfg.network.base_topic, s_node_id);
+
+        /* Room size and per-target positions ride as attributes rather than
+         * separate entities: they are context for the count, and templating
+         * off attributes beats a dozen sensors nobody graphs. */
+        int n = snprintf(payload, PAYLOAD_MAX,
+            "{\"name\":\"people\","
+            "\"unique_id\":\"roomtrack_%s_people\","
+            "\"state_topic\":\"%s\","
+            "\"json_attributes_topic\":\"%s\","
+            "\"availability_topic\":\"%s\","
+            "\"state_class\":\"measurement\","
+            "\"unit_of_measurement\":\"people\","
+            "\"icon\":\"mdi:account-multiple\","
+            "\"device\":{\"identifiers\":[\"roomtrack_%s\"],"
+            "\"name\":\"node-%s\",\"manufacturer\":\"room_tracker\","
+            "\"model\":\"ESP32-S3 + LD2450\"}}",
+            s_node_id, state, attrs, s_avail_topic, s_node_id, s_node_id);
+
+        if (n > 0 && n < PAYLOAD_MAX) {
+            esp_mqtt_client_publish(s_client, topic, payload, n, 1, true);
+        }
+    }
+
+    ESP_LOGI(TAG, "published discovery for %u zone(s)%s", s_cfg.zone_count,
+             s_cfg.network.publish_tracks ? " + people" : "");
     free(payload);
 }
 
@@ -140,6 +172,72 @@ void net_ha_publish_zone(const zone_cfg_t *zone, bool active)
     esp_mqtt_client_publish(s_client, topic, active ? "ON" : "OFF", 0, 1, true);
 }
 
+/* ---------- people / room ---------- */
+
+static uint32_t s_last_tracks_ms;
+static uint8_t  s_last_count = 0xFF;   /* 0xFF = nothing published yet */
+
+static const char *motion_name(motion_state_t m)
+{
+    switch (m) {
+        case MOTION_MOVING:  return "moving";
+        case MOTION_STOPPED: return "stopped";
+        default:             return "unknown";
+    }
+}
+
+void net_ha_publish_tracks(const track_t *tracks, uint8_t count,
+                           uint32_t now_ms)
+{
+    if (!s_client || !s_mqtt_up || !s_cfg.network.publish_tracks) {
+        return;
+    }
+
+    /* A change in how many people are in the room is the interesting event and
+     * goes out at once; their positions shifting is not worth 10 Hz of broker
+     * traffic and recorder writes. */
+    bool changed = (count != s_last_count);
+    if (!changed &&
+        (uint32_t)(now_ms - s_last_tracks_ms) < s_cfg.network.tracks_interval_ms) {
+        return;
+    }
+    s_last_tracks_ms = now_ms;
+    s_last_count = count;
+
+    char topic[TOPIC_MAX];
+    char num[8];
+    snprintf(num, sizeof num, "%u", count);
+    snprintf(topic, sizeof topic, "%s/%s/people/state",
+             s_cfg.network.base_topic, s_node_id);
+    esp_mqtt_client_publish(s_client, topic, num, 0, 0, true);
+
+    char *payload = malloc(PAYLOAD_MAX);
+    if (!payload) {
+        return;
+    }
+    int n = snprintf(payload, PAYLOAD_MAX,
+                     "{\"room_w_mm\":%d,\"room_h_mm\":%d,\"targets\":[",
+                     (int)s_cfg.room_w_mm, (int)s_cfg.room_h_mm);
+
+    for (uint8_t i = 0; i < count && n > 0 && n < PAYLOAD_MAX; i++) {
+        n += snprintf(payload + n, (size_t)(PAYLOAD_MAX - n),
+                      "%s{\"id\":%u,\"x_mm\":%d,\"y_mm\":%d,\"motion\":\"%s\"}",
+                      i ? "," : "", tracks[i].id,
+                      (int)tracks[i].x_mm, (int)tracks[i].y_mm,
+                      motion_name(tracks[i].motion));
+    }
+    if (n > 0 && n < PAYLOAD_MAX) {
+        n += snprintf(payload + n, (size_t)(PAYLOAD_MAX - n), "]}");
+    }
+
+    if (n > 0 && n < PAYLOAD_MAX) {
+        snprintf(topic, sizeof topic, "%s/%s/people/attributes",
+                 s_cfg.network.base_topic, s_node_id);
+        esp_mqtt_client_publish(s_client, topic, payload, n, 0, true);
+    }
+    free(payload);
+}
+
 /* ---------- MQTT ---------- */
 
 static void mqtt_event(void *arg, esp_event_base_t base, int32_t id, void *data)
@@ -158,6 +256,7 @@ static void mqtt_event(void *arg, esp_event_base_t base, int32_t id, void *data)
         for (uint8_t i = 0; i < s_cfg.zone_count; i++) {
             net_ha_publish_zone(&s_cfg.zones[i], false);
         }
+        s_last_count = 0xFF;   /* republish people on the next tick */
         break;
 
     case MQTT_EVENT_DISCONNECTED:
@@ -293,7 +392,19 @@ void net_ha_apply_config(const room_config_t *cfg)
     }
 
     clear_discovery(old, old_count);
+
+    /* Turning people reporting off has to delete its entity too, or Home
+     * Assistant keeps a sensor that will never update again. */
+    if (s_cfg.network.publish_tracks && !cfg->network.publish_tracks &&
+        s_client && s_mqtt_up) {
+        char topic[TOPIC_MAX];
+        snprintf(topic, sizeof topic, "%s/sensor/roomtrack_%s_people/config",
+                 s_cfg.network.discovery_prefix, s_node_id);
+        esp_mqtt_client_publish(s_client, topic, "", 0, 1, true);
+    }
+
     s_cfg = *cfg;
+    s_last_count = 0xFF;   /* force the next publish, whatever the count */
     publish_discovery();
     for (uint8_t i = 0; i < s_cfg.zone_count; i++) {
         net_ha_publish_zone(&s_cfg.zones[i], false);

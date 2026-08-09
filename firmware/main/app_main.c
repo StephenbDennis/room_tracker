@@ -252,6 +252,8 @@ static void tracker_task(void *arg)
         actions_tick(t);
 
         ble_gatt_notify_tracks(tracks, n_tracks, s_seq++);
+        /* Throttles internally; a change in the count still goes out at once. */
+        net_ha_publish_tracks(tracks, n_tracks, t);
         if (n_events > 0) {
             ble_gatt_notify_zone_state(s_cfg.zones, s_zone_states,
                                        s_cfg.zone_count);

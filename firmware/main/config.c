@@ -21,6 +21,8 @@ void config_defaults(room_config_t *cfg)
     cfg->network.enabled = false;
     strcpy(cfg->network.base_topic, "roomtrack");
     strcpy(cfg->network.discovery_prefix, "homeassistant");
+    cfg->network.publish_tracks = false;
+    cfg->network.tracks_interval_ms = 1000;
 }
 
 static void carry(char *dst, size_t cap, const char *src)
@@ -190,6 +192,12 @@ bool config_from_json(const char *json, size_t len, room_config_t *out)
         if (t[0]) strcpy(n->base_topic, t);
         json_str(net, "discovery_prefix", t, sizeof t);
         if (t[0]) strcpy(n->discovery_prefix, t);
+
+        n->publish_tracks = json_bool(net, "publish_tracks", false);
+        n->tracks_interval_ms = (uint32_t)json_num(net, "tracks_interval_ms",
+                                                   (float)n->tracks_interval_ms);
+        /* 10 Hz straight into Home Assistant's recorder helps nobody. */
+        if (n->tracks_interval_ms < 200) n->tracks_interval_ms = 200;
     }
 
     cJSON_Delete(root);

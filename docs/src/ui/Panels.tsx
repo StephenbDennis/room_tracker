@@ -7,7 +7,9 @@ import type {
   UntriggerMode,
   Zone,
 } from '../model/config';
+import { loadNetworkDefaults, saveNetworkDefaults } from '../model/config';
 import type { NodeStatus } from '../ble/codec';
+import { useState } from 'react';
 
 const num = (v: string, fallback: number) => {
   const n = Number(v);
@@ -370,8 +372,15 @@ export function NetworkPanel({
   onChange: (c: RoomConfig) => void;
 }) {
   const net = config.network;
-  const patch = (p: Partial<NetworkCfg>) =>
-    onChange({ ...config, network: { ...net, ...p } });
+  const [remember, setRemember] = useState(() => loadNetworkDefaults() !== null);
+
+  const patch = (p: Partial<NetworkCfg>) => {
+    const next = { ...net, ...p };
+    // Network settings describe the house, not this room, so mirror them out
+    // of the room config as they are edited.
+    if (remember) saveNetworkDefaults(next, true);
+    onChange({ ...config, network: next });
+  };
 
   return (
     <section className="panel">
@@ -432,10 +441,50 @@ export function NetworkPanel({
             </label>
           </div>
 
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={net.publish_tracks}
+              onChange={(e) => patch({ publish_tracks: e.target.checked })}
+            />
+            Also report room size and people
+          </label>
+          {net.publish_tracks && (
+            <label>
+              Position update interval (ms)
+              <input
+                type="number"
+                min={200}
+                step={100}
+                value={net.tracks_interval_ms}
+                onChange={(e) =>
+                  patch({ tracks_interval_ms: num(e.target.value, 1000) })
+                }
+              />
+            </label>
+          )}
+
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => {
+                setRemember(e.target.checked);
+                saveNetworkDefaults(net, e.target.checked);
+              }}
+            />
+            Remember for other boards
+          </label>
+
           <p className="hint">
             Passwords are never read back from the device. Leave a field blank
             to keep the one already stored. Network changes need a reboot to
             take effect.
+          </p>
+          <p className="hint">
+            Remembering keeps these in this browser so the next board is
+            pre-filled. That includes the passwords, in browser storage — untick
+            it if this machine is shared, and the other fields still carry over.
           </p>
         </>
       )}

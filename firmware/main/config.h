@@ -31,6 +31,12 @@ typedef struct {
     char mqtt_pass[NET_PASS_LEN];
     char base_topic[NET_TOPIC_LEN];        /* default "roomtrack" */
     char discovery_prefix[NET_TOPIC_LEN];  /* default "homeassistant" */
+
+    /* Room size and live people count/positions as a Home Assistant sensor.
+     * Separate from zone reporting because it is a continuous stream rather
+     * than an occasional event, and not every install wants it. */
+    bool     publish_tracks;
+    uint32_t tracks_interval_ms;   /* floor between position updates */
 } network_cfg_t;
 
 /* Whether a serialised config carries the secrets. NVS needs them; the copy

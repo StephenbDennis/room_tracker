@@ -221,7 +221,9 @@ Mirrors `room_config_t` (`firmware/main/config.h`) and `RoomConfig`
     "mqtt_user": "roomtrack",
     "mqtt_pass": "",              // write-only
     "base_topic": "roomtrack",
-    "discovery_prefix": "homeassistant"
+    "discovery_prefix": "homeassistant",
+    "publish_tracks": true,
+    "tracks_interval_ms": 1000
   }
 }
 ```
@@ -255,6 +257,9 @@ station is never started and the radio stays BLE-only.
 | `<prefix>/binary_sensor/roomtrack_<node>_<zone>/config` | discovery JSON | yes |
 | `<base>/<node>/zone/<zone>/state` | `ON` / `OFF` | yes |
 | `<base>/<node>/availability` | `online` / `offline` | yes (LWT) |
+| `<prefix>/sensor/roomtrack_<node>_people/config` | discovery JSON | yes |
+| `<base>/<node>/people/state` | person count | yes |
+| `<base>/<node>/people/attributes` | room size + positions | yes |
 
 `<zone>` is the zone id slugified to `[a-z0-9_-]`, since Home Assistant object
 ids do not accept free text.
@@ -267,7 +272,30 @@ the entities group under a single device.
 
 Removing a zone publishes an **empty retained payload** to its discovery topic,
 which is how Home Assistant is told to delete an entity; without it the entity
-outlives the box that created it.
+outlives the box that created it. Turning `publish_tracks` off does the same
+for the people sensor.
+
+### People and room size
+
+Optional, behind `network.publish_tracks`. One `sensor` entity holds the count;
+room dimensions and per-person positions ride as its JSON attributes rather
+than as separate entities, since they are context for the count and templating
+off attributes beats a dozen sensors nobody graphs.
+
+```json
+{
+  "room_w_mm": 5000,
+  "room_h_mm": 4000,
+  "targets": [
+    { "id": 3, "x_mm": 1820, "y_mm": 2410, "motion": "moving" }
+  ]
+}
+```
+
+Tracks update at 10 Hz, which would bury Home Assistant's recorder for no
+benefit, so positions are throttled to `tracks_interval_ms` (floor 200 ms). A
+**change in the count bypasses the throttle** — that is the event automations
+care about, and delaying it by up to a second would be felt.
 
 ---
 

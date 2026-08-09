@@ -131,6 +131,13 @@ stays BLE-only.
 2. Push the config, then reboot the board: network settings are read at start.
 3. Each event box appears in Home Assistant as an occupancy `binary_sensor`,
    grouped under one device, via MQTT discovery. No YAML.
+4. Optionally tick *Also report room size and people* for a `people` sensor
+   whose attributes carry the room dimensions and each person's position.
+
+Network settings belong to the house rather than to a room, so the web app can
+remember them: tick *Remember for other boards* and the next board you connect
+to is pre-filled instead of retyped. Anything the board already holds wins, so
+this never overwrites a working setup.
 
 State is retained, so Home Assistant recovers the current picture on restart
 instead of waiting for someone to walk through the room, and an MQTT last will

@@ -27,6 +27,13 @@ void net_ha_apply_config(const room_config_t *cfg);
  * broker connects. */
 void net_ha_publish_zone(const zone_cfg_t *zone, bool active);
 
+/* Publish the people count, their positions and the room size. Safe to call
+ * every tick: it throttles to network.tracks_interval_ms internally, and a
+ * change in the count goes out immediately regardless. Does nothing unless
+ * network.publish_tracks is set. */
+void net_ha_publish_tracks(const track_t *tracks, uint8_t count,
+                           uint32_t now_ms);
+
 /* True once WiFi has an IP and the broker session is up. */
 bool net_ha_is_connected(void);
 
