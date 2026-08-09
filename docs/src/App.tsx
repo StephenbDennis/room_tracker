@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BleLink } from './ble/client';
 import type { NodeStatus, Track, ZoneState } from './ble/codec';
 import { bluetoothAvailable, type DeviceLink } from './ble/link';
+import { Cmd } from './ble/uuids';
 import {
   loadLocal,
   newZone,
@@ -25,6 +26,7 @@ export default function App() {
   const [dirty, setDirty] = useState(false);
 
   const configRef = useRef(config);
+  const asideRef = useRef<HTMLElement>(null);
   configRef.current = config;
 
   useEffect(() => saveLocal(config), [config]);
@@ -37,6 +39,9 @@ export default function App() {
       setLink(null);
       setTracks([]);
       setZoneStates(new Map());
+      // Otherwise the device panel keeps describing a board that is gone, and
+      // `locked` below keeps reading its last-known config mode.
+      setStatus(null);
     });
   }, []);
 
@@ -76,6 +81,7 @@ export default function App() {
   function disconnect() {
     link?.disconnect();
     setLink(null);
+    setStatus(null);
   }
 
   async function pushConfig() {
@@ -86,6 +92,25 @@ export default function App() {
       await link.writeConfig(next);
       setConfig(next);
       setDirty(false);
+    } catch (e) {
+      // Web Bluetooth surfaces the firmware's ATT error as an opaque "GATT
+      // Error Unknown", so name the cause we can actually identify.
+      setError(
+        locked
+          ? 'The device refused the write because it is locked. It accepts ' +
+            'configuration only for the first 5 minutes after boot.'
+          : e instanceof Error
+            ? e.message
+            : String(e),
+      );
+    }
+  }
+
+  async function rebootDevice() {
+    if (!link) return;
+    setError(null);
+    try {
+      await link.sendCommand(new Uint8Array([Cmd.Reboot]));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -134,6 +159,14 @@ export default function App() {
     });
   }
 
+  // Stacked on a phone, the editor sits below the fold: tapping a zone would
+  // otherwise look like it did nothing at all.
+  useEffect(() => {
+    if (!selected) return;
+    if (!window.matchMedia('(max-width: 760px)').matches) return;
+    asideRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [selected]);
+
   const selectedZone = useMemo(
     () =>
       selected?.kind === 'zone'
@@ -144,6 +177,11 @@ export default function App() {
 
   const noBluetooth = !bluetoothAvailable();
 
+  // The firmware closes config mode 5 minutes after boot unless BOOT is held,
+  // and refuses writes after that. Without this the push button looks
+  // available right up until it fails with an opaque GATT error.
+  const locked = link !== null && status !== null && !status.config_mode;
+
   return (
     <div className="app">
       <header>
@@ -152,8 +190,12 @@ export default function App() {
           {link ? (
             <>
               <span className="badge ok">{link.label}</span>
-              <button onClick={pushConfig} disabled={!dirty}>
-                {dirty ? 'Push config to device' : 'Config in sync'}
+              <button onClick={pushConfig} disabled={!dirty || locked}>
+                {locked
+                  ? 'Device locked'
+                  : dirty
+                    ? 'Push config to device'
+                    : 'Config in sync'}
               </button>
               <button onClick={disconnect}>Disconnect</button>
             </>
@@ -175,6 +217,17 @@ export default function App() {
           to the sensors. The simulator works everywhere.
         </div>
       )}
+      {locked && (
+        <div className="notice">
+          This device is locked. It accepts configuration only for the first
+          5 minutes after boot, so nothing left on a wall can be reconfigured
+          by anyone in range. Hold its BOOT button to unlock, or{' '}
+          <button className="small" onClick={rebootDevice}>
+            reboot it
+          </button>{' '}
+          for a fresh window.
+        </div>
+      )}
       {error && <div className="notice error">{error}</div>}
 
       <main>
@@ -189,7 +242,7 @@ export default function App() {
           />
         </div>
 
-        <aside>
+        <aside ref={asideRef}>
           <div className="toolbar">
             <button onClick={addZone}>+ Event box</button>
             <button onClick={exportJson}>Export</button>

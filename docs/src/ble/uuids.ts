@@ -10,7 +10,10 @@ export const CHR_ZONE_STATE = base('04');
 export const CHR_STATUS = base('05');
 export const CHR_COMMAND = base('06');
 
-export const enum Cmd {
+/* A plain enum, not `const enum`: this project sets isolatedModules, where
+ * const enums cannot be inlined across files and each bundler emits its own
+ * approximation. A regular enum is a real runtime object everywhere. */
+export enum Cmd {
   Identify = 0x01,
   Reboot = 0x02,
   FactoryReset = 0x03,

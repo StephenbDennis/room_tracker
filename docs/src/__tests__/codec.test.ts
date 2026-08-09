@@ -2,11 +2,15 @@ import { describe, expect, it } from 'vitest';
 import {
   CHUNK_PAYLOAD,
   decodeConfigChunks,
+  decodeStatus,
   decodeTracks,
   decodeZoneState,
   encodeConfigChunks,
   encodeGpioTest,
 } from '../ble/codec';
+
+const statusPacket = (json: string): DataView =>
+  new DataView(new TextEncoder().encode(json).buffer);
 
 function trackPacket(
   seq: number,
@@ -70,6 +74,61 @@ describe('decodeTracks', () => {
   it('maps an unknown motion byte to unknown', () => {
     const f = decodeTracks(trackPacket(1, [[1, 0, 0, 0, 0, 99]]));
     expect(f.tracks[0].motion).toBe('unknown');
+  });
+});
+
+describe('decodeStatus', () => {
+  it('decodes a well-formed payload', () => {
+    const s = decodeStatus(
+      statusPacket(
+        '{"node_id":"a1b2c3","name":"node-a1b2c3","config_version":7,' +
+          '"uptime_s":4210,"config_mode":true}',
+      ),
+    );
+    expect(s).toEqual({
+      node_id: 'a1b2c3',
+      name: 'node-a1b2c3',
+      config_version: 7,
+      uptime_s: 4210,
+      config_mode: true,
+    });
+  });
+
+  // Firmware and this page cannot update atomically, so a board may always
+  // send a shape this build does not expect. Missing fields must come back
+  // defined rather than undefined, or they surface as a crash during render.
+  it('fills in fields the firmware did not send', () => {
+    const s = decodeStatus(statusPacket('{"node_id":"a1b2c3"}'));
+    expect(s).toEqual({
+      node_id: 'a1b2c3',
+      name: '',
+      config_version: 0,
+      uptime_s: 0,
+      config_mode: false,
+    });
+  });
+
+  it('ignores unknown fields from older firmware', () => {
+    const s = decodeStatus(
+      statusPacket('{"node_id":"a1","name":"n","config_version":2,' +
+        '"uptime_s":3,"config_mode":false,"peers":[{"id":"b2"}]}'),
+    );
+    expect(s).not.toHaveProperty('peers');
+    expect(s?.config_version).toBe(2);
+  });
+
+  it('rejects wrong-typed fields rather than passing them through', () => {
+    const s = decodeStatus(
+      statusPacket('{"node_id":42,"config_version":"seven"}'),
+    );
+    expect(s?.node_id).toBe('');
+    expect(s?.config_version).toBe(0);
+  });
+
+  it('returns null on malformed JSON and on non-objects', () => {
+    expect(decodeStatus(statusPacket('{not json'))).toBeNull();
+    expect(decodeStatus(statusPacket('"a string"'))).toBeNull();
+    expect(decodeStatus(statusPacket('null'))).toBeNull();
   });
 });
 
