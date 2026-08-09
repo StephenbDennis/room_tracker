@@ -9,6 +9,7 @@ export const CHR_TRACKS = base('03');
 export const CHR_ZONE_STATE = base('04');
 export const CHR_STATUS = base('05');
 export const CHR_COMMAND = base('06');
+export const CHR_WIFI_SCAN = base('07');
 
 /* A plain enum, not `const enum`: this project sets isolatedModules, where
  * const enums cannot be inlined across files and each bundler emits its own
@@ -19,4 +20,5 @@ export enum Cmd {
   FactoryReset = 0x03,
   GpioTest = 0x04,
   Save = 0x05,
+  WifiScan = 0x06,
 }

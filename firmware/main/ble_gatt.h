@@ -20,6 +20,7 @@ typedef enum {
     BLE_CMD_FACTORY_RESET = 0x03,
     BLE_CMD_GPIO_TEST     = 0x04,  /* [pin u8][level u8][ms u16] */
     BLE_CMD_SAVE          = 0x05,
+    BLE_CMD_WIFI_SCAN     = 0x06,  /* results arrive on WIFI_SCAN, notify */
 } ble_cmd_t;
 
 typedef struct {
@@ -45,6 +46,9 @@ void ble_gatt_notify_zone_state(const zone_cfg_t *zones,
 void ble_gatt_set_status(const char *node_id, const char *name,
                          uint32_t config_version, uint32_t uptime_s,
                          bool config_mode);
+
+/* Publish the latest access-point scan. Read or notify on WIFI_SCAN. */
+void ble_gatt_set_wifi_scan(const char *json, size_t len);
 
 bool ble_gatt_is_connected(void);
 

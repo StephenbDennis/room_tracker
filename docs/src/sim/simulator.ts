@@ -1,6 +1,13 @@
 import type { RoomConfig } from '../model/config';
 import type { DeviceLink } from '../ble/link';
-import type { NodeStatus, Track, TrackFrame, ZoneState } from '../ble/codec';
+import type {
+  NodeStatus,
+  Track,
+  TrackFrame,
+  WifiNetwork,
+  ZoneState,
+} from '../ble/codec';
+import { Cmd } from '../ble/uuids';
 import { newRuntime, updateAll, type ZoneRuntime } from './zoneEngine';
 
 /* Offline device: synthesises people walking the room and runs the same zone
@@ -41,6 +48,7 @@ export class SimLink implements DeviceLink {
   private cbZone: (z: ZoneState[]) => void = () => {};
   private cbStatus: (s: NodeStatus) => void = () => {};
   private cbGone: () => void = () => {};
+  private cbScan: (n: WifiNetwork[]) => void = () => {};
 
   constructor(cfg: RoomConfig, private walkerCount = 2) {
     this.cfg = cfg;
@@ -101,9 +109,22 @@ export class SimLink implements DeviceLink {
     return this.cfg;
   }
 
-  async sendCommand(): Promise<void> {
-    /* no-op offline */
+  async sendCommand(bytes: Uint8Array): Promise<void> {
+    /* Only the scan is worth simulating; the rest act on hardware. */
+    if (bytes[0] === Cmd.WifiScan) {
+      setTimeout(
+        () =>
+          this.cbScan([
+            { ssid: 'sim-house', rssi: -46, secure: true },
+            { ssid: 'sim-guest', rssi: -67, secure: true },
+            { ssid: 'sim-open', rssi: -81, secure: false },
+          ]),
+        700,
+      );
+    }
   }
+
+  onWifiScan(cb: (n: WifiNetwork[]) => void) { this.cbScan = cb; }
 
   private tick(): void {
     const dt = TICK_MS / 1000;

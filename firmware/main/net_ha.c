@@ -27,6 +27,8 @@ static bool                s_wifi_up;
 static bool                s_mqtt_up;
 static char                s_avail_topic[TOPIC_MAX];
 
+static void wifi_ensure_started(void);
+
 /* ---------- topics ---------- */
 
 /* Home Assistant object ids must be [a-zA-Z0-9_-]; zone ids and names are free
@@ -304,16 +306,130 @@ static void mqtt_start(void)
     esp_mqtt_client_start(s_client);
 }
 
+/* ---------- scan ---------- */
+
+#define SCAN_MAX_APS   16
+#define SCAN_JSON_MAX  900
+
+static net_ha_scan_cb_t s_scan_cb;
+static bool             s_scanning;
+
+/* Called from the WiFi event task when a scan finishes. */
+static void scan_done(void)
+{
+    s_scanning = false;
+    if (!s_scan_cb) {
+        esp_wifi_clear_ap_list();   /* results are held until read or cleared */
+        return;
+    }
+
+    uint16_t found = SCAN_MAX_APS;
+    wifi_ap_record_t *aps = calloc(SCAN_MAX_APS, sizeof *aps);
+    char *json = malloc(SCAN_JSON_MAX);
+    if (!aps || !json) {
+        free(aps);
+        free(json);
+        return;
+    }
+
+    if (esp_wifi_scan_get_ap_records(&found, aps) != ESP_OK) {
+        free(aps);
+        free(json);
+        return;
+    }
+
+    int n = snprintf(json, SCAN_JSON_MAX, "{\"networks\":[");
+    uint8_t written = 0;
+
+    for (uint16_t i = 0; i < found && n > 0 && n < SCAN_JSON_MAX; i++) {
+        const char *ssid = (const char *)aps[i].ssid;
+        if (ssid[0] == '\0') {
+            continue;   /* hidden network: nothing to offer the user */
+        }
+
+        /* One entry per name, strongest wins. A mesh or an extender puts the
+         * same SSID on several BSSIDs, and a list with four identical rows is
+         * worse than useless when the point is to avoid typing. */
+        bool dup = false;
+        for (uint16_t j = 0; j < i; j++) {
+            if (strcmp((const char *)aps[j].ssid, ssid) == 0) {
+                dup = true;
+                break;
+            }
+        }
+        if (dup) {
+            continue;
+        }
+
+        /* SSIDs are arbitrary bytes; escape what would break the JSON. */
+        char safe[33];
+        size_t o = 0;
+        for (size_t k = 0; ssid[k] && o + 2 < sizeof safe; k++) {
+            char c = ssid[k];
+            if (c == '"' || c == '\\') safe[o++] = '\\';
+            safe[o++] = (c >= 0x20 && c < 0x7f) ? c : '?';
+        }
+        safe[o] = '\0';
+
+        n += snprintf(json + n, (size_t)(SCAN_JSON_MAX - n),
+                      "%s{\"ssid\":\"%s\",\"rssi\":%d,\"secure\":%s}",
+                      written ? "," : "", safe, aps[i].rssi,
+                      aps[i].authmode == WIFI_AUTH_OPEN ? "false" : "true");
+        written++;
+    }
+
+    if (n > 0 && n < SCAN_JSON_MAX) {
+        n += snprintf(json + n, (size_t)(SCAN_JSON_MAX - n), "]}");
+    }
+
+    if (n > 0 && n < SCAN_JSON_MAX) {
+        ESP_LOGI(TAG, "scan found %u network(s)", written);
+        s_scan_cb(json, (size_t)n);
+    }
+
+    free(aps);
+    free(json);
+}
+
+bool net_ha_scan_start(net_ha_scan_cb_t cb)
+{
+    if (s_scanning) {
+        return false;
+    }
+    s_scan_cb = cb;
+
+    /* Deliberately does not require credentials or network.enabled: the whole
+     * point is to run before either exists. */
+    wifi_ensure_started();
+
+    wifi_scan_config_t sc = { .show_hidden = false };
+    /* Async: the caller is a BLE write handler on the NimBLE host task, and a
+     * blocking scan there would stall the connection for seconds. */
+    if (esp_wifi_scan_start(&sc, false) != ESP_OK) {
+        return false;
+    }
+    s_scanning = true;
+    return true;
+}
+
 /* ---------- WiFi ---------- */
+
+/* Scanning has to work before any credentials exist, so bringing the station
+ * up is separate from connecting it. Without this the STA_START handler would
+ * fire esp_wifi_connect() against an empty SSID and spin. */
+static bool s_want_connect;
 
 static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
     (void)arg;
 
     if (base == WIFI_EVENT && id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
+        if (s_want_connect) esp_wifi_connect();
+    } else if (base == WIFI_EVENT && id == WIFI_EVENT_SCAN_DONE) {
+        scan_done();
     } else if (base == WIFI_EVENT && id == WIFI_EVENT_STA_DISCONNECTED) {
         s_wifi_up = false;
+        if (!s_want_connect) return;
         /* The zone engine and GPIO do not care that the network is gone, so
          * just keep retrying quietly rather than escalating. */
         vTaskDelay(pdMS_TO_TICKS(2000));
@@ -326,8 +442,13 @@ static void wifi_event(void *arg, esp_event_base_t base, int32_t id, void *data)
     }
 }
 
-static void wifi_start(void)
+/* Bring the station up without associating. Idempotent: the scan path and the
+ * reporting path both call it and either may come first. */
+static void wifi_ensure_started(void)
 {
+    if (s_started) {
+        return;
+    }
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     esp_netif_create_default_wifi_sta();
@@ -340,19 +461,27 @@ static void wifi_start(void)
     ESP_ERROR_CHECK(esp_event_handler_instance_register(
         IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event, NULL, NULL));
 
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    /* BLE stays the configuration path and must keep working while WiFi is
+     * associating or scanning, so let the coexistence scheduler share the
+     * radio. */
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
+    ESP_ERROR_CHECK(esp_wifi_start());
+    s_started = true;
+}
+
+static void wifi_connect(void)
+{
     wifi_config_t wc = { 0 };
     strncpy((char *)wc.sta.ssid, s_cfg.network.wifi_ssid,
             sizeof wc.sta.ssid - 1);
     strncpy((char *)wc.sta.password, s_cfg.network.wifi_pass,
             sizeof wc.sta.password - 1);
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    s_want_connect = true;
+    wifi_ensure_started();
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wc));
-    /* BLE stays the configuration path and must keep working while WiFi is
-     * associating, so let the coexistence scheduler share the radio. */
-    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_MIN_MODEM));
-    ESP_ERROR_CHECK(esp_wifi_start());
-    s_started = true;
+    esp_wifi_connect();
 }
 
 /* ---------- public ---------- */
@@ -367,7 +496,7 @@ void net_ha_init(const room_config_t *cfg, const char *node_id)
         ESP_LOGI(TAG, "network reporting disabled");
         return;
     }
-    wifi_start();
+    wifi_connect();
 }
 
 void net_ha_apply_config(const room_config_t *cfg)

@@ -1,5 +1,5 @@
 import type { RoomConfig } from '../model/config';
-import type { NodeStatus, TrackFrame, ZoneState } from './codec';
+import type { NodeStatus, TrackFrame, WifiNetwork, ZoneState } from './codec';
 
 /* A source of live room data. The real BLE client and the offline simulator
  * both implement this, so every panel and the renderer work identically with
@@ -16,6 +16,7 @@ export interface DeviceLink {
   onZoneState(cb: (z: ZoneState[]) => void): void;
   onStatus(cb: (s: NodeStatus) => void): void;
   onDisconnected(cb: () => void): void;
+  onWifiScan(cb: (n: WifiNetwork[]) => void): void;
 
   writeConfig(cfg: RoomConfig): Promise<void>;
   readConfig(): Promise<RoomConfig | null>;

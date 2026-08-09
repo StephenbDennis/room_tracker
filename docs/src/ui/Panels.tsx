@@ -8,7 +8,7 @@ import type {
   Zone,
 } from '../model/config';
 import { loadNetworkDefaults, saveNetworkDefaults } from '../model/config';
-import type { NodeStatus } from '../ble/codec';
+import type { NodeStatus, WifiNetwork } from '../ble/codec';
 import { useState } from 'react';
 
 const num = (v: string, fallback: number) => {
@@ -367,9 +367,16 @@ export function ZonePanel({
 export function NetworkPanel({
   config,
   onChange,
+  onScan,
+  scanning,
+  networks,
 }: {
   config: RoomConfig;
   onChange: (c: RoomConfig) => void;
+  /** Undefined when nothing is connected, since only a board can scan. */
+  onScan?: () => void;
+  scanning: boolean;
+  networks: WifiNetwork[] | null;
 }) {
   const net = config.network;
   const [remember, setRemember] = useState(() => loadNetworkDefaults() !== null);
@@ -404,6 +411,34 @@ export function NetworkPanel({
               onChange={(e) => patch({ wifi_ssid: e.target.value })}
             />
           </label>
+
+          {onScan && (
+            <button className="small" onClick={onScan} disabled={scanning}>
+              {scanning ? 'Scanning…' : 'Scan for networks'}
+            </button>
+          )}
+
+          {networks !== null && networks.length === 0 && (
+            <p className="hint">No networks found.</p>
+          )}
+
+          {networks !== null && networks.length > 0 && (
+            <ul className="networks">
+              {networks.map((n) => (
+                <li key={n.ssid}>
+                  <button
+                    className={n.ssid === net.wifi_ssid ? 'small sel' : 'small'}
+                    onClick={() => patch({ wifi_ssid: n.ssid })}
+                  >
+                    {n.ssid}
+                  </button>
+                  <span className="hint">
+                    {n.secure ? '🔒' : 'open'} {n.rssi} dBm
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
           <label>
             WiFi password
             <input

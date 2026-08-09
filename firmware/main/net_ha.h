@@ -37,4 +37,14 @@ void net_ha_publish_tracks(const track_t *tracks, uint8_t count,
 /* True once WiFi has an IP and the broker session is up. */
 bool net_ha_is_connected(void);
 
+/* Receives `{"networks":[{"ssid","rssi","secure"},...]}` when a scan finishes.
+ * Called from the WiFi event task, and the buffer is only valid for the call. */
+typedef void (*net_ha_scan_cb_t)(const char *json, size_t len);
+
+/* Start an access-point scan. Asynchronous: returns as soon as the scan is
+ * queued, and `cb` fires later with the results. Works with reporting disabled
+ * and no credentials stored -- that is the case it exists for. Returns false
+ * if a scan is already running. */
+bool net_ha_scan_start(net_ha_scan_cb_t cb);
+
 #endif /* NET_HA_H */

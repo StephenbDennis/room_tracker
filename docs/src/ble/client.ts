@@ -2,10 +2,12 @@ import { defaultConfig, validateConfig, type RoomConfig } from '../model/config'
 import {
   decodeStatus,
   decodeTracks,
+  decodeWifiScan,
   decodeZoneState,
   encodeConfigChunks,
   type NodeStatus,
   type TrackFrame,
+  type WifiNetwork,
   type ZoneState,
 } from './codec';
 import type { DeviceLink } from './link';
@@ -14,6 +16,7 @@ import {
   CHR_CONFIG_READ,
   CHR_CONFIG_WRITE,
   CHR_STATUS,
+  CHR_WIFI_SCAN,
   CHR_TRACKS,
   CHR_ZONE_STATE,
   SVC_UUID,
@@ -37,6 +40,7 @@ export class BleLink implements DeviceLink {
   private cbZone: (z: ZoneState[]) => void = () => {};
   private cbStatus: (s: NodeStatus) => void = () => {};
   private cbGone: () => void = () => {};
+  private cbScan: (n: WifiNetwork[]) => void = () => {};
 
   get label(): string {
     return this.device?.name ?? 'no device';
@@ -94,6 +98,15 @@ export class BleLink implements DeviceLink {
     const first = await status.readValue();
     const s = decodeStatus(first);
     if (s) this.cbStatus(s);
+
+    // A scan takes seconds, so results arrive by notification rather than as
+    // the response to the command that started it.
+    const scan = await svc.getCharacteristic(CHR_WIFI_SCAN);
+    scan.addEventListener('characteristicvaluechanged', (e) => {
+      const dv = (e.target as BluetoothRemoteGATTCharacteristic).value;
+      if (dv) this.cbScan(decodeWifiScan(dv));
+    });
+    await scan.startNotifications();
   }
 
   disconnect(): void {
@@ -108,6 +121,7 @@ export class BleLink implements DeviceLink {
   onTracks(cb: (f: TrackFrame) => void) { this.cbTracks = cb; }
   onZoneState(cb: (z: ZoneState[]) => void) { this.cbZone = cb; }
   onStatus(cb: (s: NodeStatus) => void) { this.cbStatus = cb; }
+  onWifiScan(cb: (n: WifiNetwork[]) => void) { this.cbScan = cb; }
   onDisconnected(cb: () => void) { this.cbGone = cb; }
 
   async writeConfig(cfg: RoomConfig): Promise<void> {

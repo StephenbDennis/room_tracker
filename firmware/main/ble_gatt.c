@@ -28,13 +28,14 @@ static const ble_uuid128_t CHR_TRACKS        = UUID128_BASE(0x03);
 static const ble_uuid128_t CHR_ZONE_STATE    = UUID128_BASE(0x04);
 static const ble_uuid128_t CHR_STATUS        = UUID128_BASE(0x05);
 static const ble_uuid128_t CHR_COMMAND       = UUID128_BASE(0x06);
+static const ble_uuid128_t CHR_WIFI_SCAN     = UUID128_BASE(0x07);
 
 static ble_gatt_cbs_t s_cbs;
 static uint8_t        s_addr_type;
 static uint16_t       s_conn_handle = BLE_HS_CONN_HANDLE_NONE;
 static bool           s_config_mode = true;
 
-static uint16_t s_h_tracks, s_h_zone, s_h_status;
+static uint16_t s_h_tracks, s_h_zone, s_h_status, s_h_scan;
 
 /* Reassembly buffer for inbound config writes. */
 static char     s_cfg_in[CONFIG_JSON_MAX];
@@ -46,6 +47,8 @@ static char   s_cfg_out[CONFIG_JSON_MAX];
 static size_t s_cfg_out_len;
 static char   s_status[1024];
 static size_t s_status_len;
+static char   s_scan[1024];
+static size_t s_scan_len;
 
 static void advertise(void);
 
@@ -131,6 +134,15 @@ static int chr_status_read(uint16_t conn, uint16_t attr,
                ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
 }
 
+/* Results outlive the notification so a client that connected late, or missed
+ * it, can still read the last scan rather than having to trigger another. */
+static int chr_scan_read(uint16_t conn, uint16_t attr,
+                         struct ble_gatt_access_ctxt *ctxt, void *arg)
+{
+    return os_mbuf_append(ctxt->om, s_scan, s_scan_len) == 0
+               ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+}
+
 static int chr_command_write(uint16_t conn, uint16_t attr,
                              struct ble_gatt_access_ctxt *ctxt, void *arg)
 {
@@ -181,6 +193,10 @@ static const struct ble_gatt_svc_def SERVICES[] = {
             { .uuid = &CHR_COMMAND.u,
               .access_cb = chr_command_write,
               .flags = BLE_GATT_CHR_F_WRITE },
+            { .uuid = &CHR_WIFI_SCAN.u,
+              .access_cb = chr_scan_read,
+              .val_handle = &s_h_scan,
+              .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_NOTIFY },
             { 0 },
         },
     },
@@ -297,6 +313,23 @@ void ble_gatt_set_config_json(const char *json, size_t len)
     memcpy(s_cfg_out, json, len);
     s_cfg_out[len] = '\0';
     s_cfg_out_len = len;
+}
+
+void ble_gatt_set_wifi_scan(const char *json, size_t len)
+{
+    if (len >= sizeof s_scan) {
+        len = sizeof s_scan - 1;
+    }
+    memcpy(s_scan, json, len);
+    s_scan[len] = '\0';
+    s_scan_len = len;
+
+    if (ble_gatt_is_connected() && s_scan_len > 0) {
+        struct os_mbuf *om = ble_hs_mbuf_from_flat(s_scan, s_scan_len);
+        if (om) {
+            ble_gatts_notify_custom(s_conn_handle, s_h_scan, om);
+        }
+    }
 }
 
 bool ble_gatt_is_connected(void)

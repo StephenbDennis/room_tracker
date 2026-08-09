@@ -31,6 +31,36 @@ export interface NodeStatus {
   config_mode: boolean;
 }
 
+export interface WifiNetwork {
+  ssid: string;
+  rssi: number;
+  secure: boolean;
+}
+
+/* Same defensive shape as decodeStatus: a board on different firmware still
+ * parses as JSON, and a bad row must not take the picker down. */
+export function decodeWifiScan(dv: DataView): WifiNetwork[] {
+  try {
+    const raw: unknown = JSON.parse(new TextDecoder().decode(dv));
+    if (typeof raw !== 'object' || raw === null) return [];
+    const list = (raw as { networks?: unknown }).networks;
+    if (!Array.isArray(list)) return [];
+
+    return list.flatMap((e): WifiNetwork[] => {
+      if (typeof e !== 'object' || e === null) return [];
+      const o = e as Record<string, unknown>;
+      if (typeof o.ssid !== 'string' || o.ssid === '') return [];
+      return [{
+        ssid: o.ssid,
+        rssi: typeof o.rssi === 'number' ? o.rssi : 0,
+        secure: o.secure !== false,
+      }];
+    });
+  } catch {
+    return [];
+  }
+}
+
 const MOTION: Motion[] = ['unknown', 'moving', 'stopped'];
 
 /** [seq u16][n u8][ id u8, x i16, y i16, vx i16, vy i16, state u8 ] * n */

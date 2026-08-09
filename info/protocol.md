@@ -106,6 +106,7 @@ base with the final byte varying.
 | `04` | ZONE_STATE | notify |
 | `05` | STATUS | read, notify |
 | `06` | COMMAND | write |
+| `07` | WIFI_SCAN | read, notify |
 
 MTU is negotiated to 517.
 
@@ -171,9 +172,28 @@ because Web Bluetooth does not expose the negotiated MTU.
 | `0x03` | Factory reset | — |
 | `0x04` | GPIO test pulse | `[pin u8][level u8][ms u16]` |
 | `0x05` | Save to NVS | — |
+| `0x06` | Scan for WiFi networks | — |
 
 Writes to CONFIG_WRITE and COMMAND are refused unless the node is in **config
 mode**: the first 5 minutes after boot, or while the BOOT button is held.
+
+### WIFI_SCAN — read / notify
+
+A scan takes seconds, so `0x06` returns immediately and the results arrive as a
+notification when the scan completes; they are also retained for reading, so a
+client that reconnects does not have to trigger another.
+
+```json
+{ "networks": [ { "ssid": "house", "rssi": -52, "secure": true } ] }
+```
+
+Capped at 16 entries, hidden networks omitted, and **one entry per SSID with
+the strongest kept** — a mesh puts the same name on several BSSIDs, and a list
+of identical rows defeats the point of not typing it.
+
+Scanning deliberately works with `network.enabled` false and no credentials
+stored: it exists to be used before either is set. It brings the station up
+without associating.
 
 ---
 

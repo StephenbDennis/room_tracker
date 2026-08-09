@@ -126,6 +126,13 @@ static void on_command(ble_cmd_t cmd, const uint8_t *args, size_t len)
     case BLE_CMD_SAVE:
         config_save(&s_cfg);
         break;
+    case BLE_CMD_WIFI_SCAN:
+        /* Asynchronous: this runs on the NimBLE host task and a blocking scan
+         * would stall the connection the results have to come back over. */
+        if (!net_ha_scan_start(ble_gatt_set_wifi_scan)) {
+            ESP_LOGW(TAG, "wifi scan already running");
+        }
+        break;
     }
 }
 

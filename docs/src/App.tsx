@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BleLink } from './ble/client';
-import type { NodeStatus, Track, ZoneState } from './ble/codec';
+import type { NodeStatus, Track, WifiNetwork, ZoneState } from './ble/codec';
 import { bluetoothAvailable, type DeviceLink } from './ble/link';
 import { Cmd } from './ble/uuids';
 import {
@@ -30,6 +30,8 @@ export default function App() {
   const [status, setStatus] = useState<NodeStatus | null>(null);
   const [selected, setSelected] = useState<Selection>(null);
   const [error, setError] = useState<string | null>(null);
+  const [wifiScan, setWifiScan] = useState<WifiNetwork[] | null>(null);
+  const [scanning, setScanning] = useState(false);
   const [dirty, setDirty] = useState(false);
 
   const configRef = useRef(config);
@@ -42,6 +44,10 @@ export default function App() {
     l.onTracks((f) => setTracks(f.tracks));
     l.onZoneState((zs) => setZoneStates(new Map(zs.map((z) => [z.index, z]))));
     l.onStatus(setStatus);
+    l.onWifiScan((n) => {
+      setWifiScan(n);
+      setScanning(false);
+    });
     l.onDisconnected(() => {
       setLink(null);
       setTracks([]);
@@ -114,6 +120,22 @@ export default function App() {
             ? e.message
             : String(e),
       );
+    }
+  }
+
+  async function scanWifi() {
+    if (!link) return;
+    setError(null);
+    setScanning(true);
+    setWifiScan(null);
+    try {
+      await link.sendCommand(new Uint8Array([Cmd.WifiScan]));
+      // The device scans for a few seconds and notifies; give up rather than
+      // leaving a spinner running forever if nothing comes back.
+      window.setTimeout(() => setScanning(false), 12000);
+    } catch (e) {
+      setScanning(false);
+      setError(e instanceof Error ? e.message : String(e));
     }
   }
 
@@ -292,7 +314,13 @@ export default function App() {
             <SensorPanel config={config} onChange={update} />
           )}
 
-          <NetworkPanel config={config} onChange={update} />
+          <NetworkPanel
+            config={config}
+            onChange={update}
+            onScan={link ? scanWifi : undefined}
+            scanning={scanning}
+            networks={wifiScan}
+          />
 
           <DevicePanel status={status} configVersion={config.version} />
         </aside>
