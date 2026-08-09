@@ -75,10 +75,27 @@ export function decodeZoneState(dv: DataView): ZoneState[] {
   return out;
 }
 
+/* Normalises rather than casts. A board running different firmware than this
+ * page expects still parses as valid JSON, so a bare `as NodeStatus` would
+ * hand the UI an object missing fields it is typed to have — which renders as
+ * a crash somewhere far from here. Every field below comes back defined. */
 export function decodeStatus(dv: DataView): NodeStatus | null {
   try {
-    const text = new TextDecoder().decode(dv);
-    return JSON.parse(text) as NodeStatus;
+    const raw: unknown = JSON.parse(new TextDecoder().decode(dv));
+    if (typeof raw !== 'object' || raw === null) return null;
+    const o = raw as Record<string, unknown>;
+
+    const str = (v: unknown, dflt: string) => (typeof v === 'string' ? v : dflt);
+    const num = (v: unknown, dflt: number) =>
+      typeof v === 'number' && Number.isFinite(v) ? v : dflt;
+
+    return {
+      node_id: str(o.node_id, ''),
+      name: str(o.name, ''),
+      config_version: num(o.config_version, 0),
+      uptime_s: num(o.uptime_s, 0),
+      config_mode: o.config_mode === true,
+    };
   } catch {
     return null;
   }
