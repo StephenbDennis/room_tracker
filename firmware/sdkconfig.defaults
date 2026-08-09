@@ -20,11 +20,24 @@ CONFIG_BT_NIMBLE_GATT_MAX_PROCS=8
 # 4 kB default leaves no margin for that.
 CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=6144
 
-# --- WiFi ---
-# Nothing uses the WiFi radio: one board per room, so there are no peers to
-# talk to and BLE is the only link. Leaving it out frees the radio entirely,
-# so no BLE/WiFi coexistence scheduling is needed either.
-CONFIG_ESP_WIFI_ENABLED=n
+# --- WiFi / MQTT ---
+# Only used when the config carries credentials; with reporting off the station
+# is never started and the radio stays BLE-only.
+CONFIG_ESP_WIFI_ENABLED=y
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=8
+CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM=16
+
+# --- BLE / WiFi coexistence ---
+# Both share one radio on the S3. BLE is the configuration path and must keep
+# working while WiFi is associating, so the scheduler has to arbitrate.
+CONFIG_ESP_COEX_SW_COEXIST_ENABLE=y
+
+# --- Partitions ---
+# WiFi, lwIP and the MQTT client do not fit alongside NimBLE in the 1 MB
+# single-app partition. The "large" layout gives 1.5 MB, which needs 1.625 MB
+# of flash in total -- fine on 2 MB, and this must be raised further if
+# CONFIG_ESPTOOLPY_FLASHSIZE is wrong for the board.
+CONFIG_PARTITION_TABLE_SINGLE_APP_LARGE=y
 
 # --- UART ---
 # 256000 baud from the LD2450; the default REF_TICK source cannot divide to it

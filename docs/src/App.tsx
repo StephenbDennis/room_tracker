@@ -13,7 +13,13 @@ import {
 } from './model/config';
 import { RoomCanvas, type Selection } from './render/RoomCanvas';
 import { SimLink } from './sim/simulator';
-import { DevicePanel, RoomPanel, SensorPanel, ZonePanel } from './ui/Panels';
+import {
+  DevicePanel,
+  NetworkPanel,
+  RoomPanel,
+  SensorPanel,
+  ZonePanel,
+} from './ui/Panels';
 
 export default function App() {
   const [config, setConfig] = useState<RoomConfig>(() => loadLocal());
@@ -280,6 +286,8 @@ export default function App() {
           {selected?.kind === 'sensor' && (
             <SensorPanel config={config} onChange={update} />
           )}
+
+          <NetworkPanel config={config} onChange={update} />
 
           <DevicePanel status={status} configVersion={config.version} />
         </aside>

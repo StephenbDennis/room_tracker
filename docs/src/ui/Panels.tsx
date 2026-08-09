@@ -1,6 +1,7 @@
 import type {
   CountOp,
   MotionState,
+  NetworkCfg,
   RoomConfig,
   SensorPose,
   UntriggerMode,
@@ -357,6 +358,87 @@ export function ZonePanel({
       <button className="danger" onClick={onDelete}>
         Delete event box
       </button>
+    </section>
+  );
+}
+
+export function NetworkPanel({
+  config,
+  onChange,
+}: {
+  config: RoomConfig;
+  onChange: (c: RoomConfig) => void;
+}) {
+  const net = config.network;
+  const patch = (p: Partial<NetworkCfg>) =>
+    onChange({ ...config, network: { ...net, ...p } });
+
+  return (
+    <section className="panel">
+      <h3>Home Assistant</h3>
+
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={net.enabled}
+          onChange={(e) => patch({ enabled: e.target.checked })}
+        />
+        Report zones over MQTT
+      </label>
+
+      {net.enabled && (
+        <>
+          <label>
+            WiFi network
+            <input
+              value={net.wifi_ssid}
+              onChange={(e) => patch({ wifi_ssid: e.target.value })}
+            />
+          </label>
+          <label>
+            WiFi password
+            <input
+              type="password"
+              value={net.wifi_pass}
+              placeholder={net.wifi_pass_set ? 'saved on device' : ''}
+              onChange={(e) => patch({ wifi_pass: e.target.value })}
+            />
+          </label>
+
+          <label>
+            Broker
+            <input
+              value={net.mqtt_uri}
+              placeholder="mqtt://homeassistant.local:1883"
+              onChange={(e) => patch({ mqtt_uri: e.target.value })}
+            />
+          </label>
+          <div className="row">
+            <label>
+              MQTT user
+              <input
+                value={net.mqtt_user}
+                onChange={(e) => patch({ mqtt_user: e.target.value })}
+              />
+            </label>
+            <label>
+              MQTT password
+              <input
+                type="password"
+                value={net.mqtt_pass}
+                placeholder={net.mqtt_pass_set ? 'saved on device' : ''}
+                onChange={(e) => patch({ mqtt_pass: e.target.value })}
+              />
+            </label>
+          </div>
+
+          <p className="hint">
+            Passwords are never read back from the device. Leave a field blank
+            to keep the one already stored. Network changes need a reboot to
+            take effect.
+          </p>
+        </>
+      )}
     </section>
   );
 }

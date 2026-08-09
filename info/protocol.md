@@ -212,6 +212,16 @@ Mirrors `room_config_t` (`firmware/main/config.h`) and `RoomConfig`
     "assoc_gate_mm": 800, "coast_ms": 1000,
     "moving_thresh_mms": 100, "stopped_thresh_mms": 50,
     "stopped_hold_ms": 1000
+  },
+  "network": {
+    "enabled": true,
+    "wifi_ssid": "house",
+    "wifi_pass": "",              // write-only; see below
+    "mqtt_uri": "mqtt://homeassistant.local:1883",
+    "mqtt_user": "roomtrack",
+    "mqtt_pass": "",              // write-only
+    "base_topic": "roomtrack",
+    "discovery_prefix": "homeassistant"
   }
 }
 ```
@@ -226,8 +236,40 @@ Notes:
   until the conditions clear at least once — otherwise a still-present target
   would immediately re-trigger and oscillate forever. The same suppression
   applies after a `timer`-mode release.
+- **Passwords are write-only.** CONFIG_READ serves a redacted copy carrying
+  `wifi_pass_set` and `mqtt_pass_set` booleans instead of the values, because
+  anything that can reach CONFIG_READ in config mode could otherwise read the
+  WiFi password straight back out. An empty password on write keeps the stored
+  one, so the webpage can push a config it never had the secrets for. NVS holds
+  the unredacted copy.
 - The board's display name is **not** in this schema. The firmware reports its
   own name via STATUS; the web app keeps any user-assigned label locally.
+
+## 4. MQTT / Home Assistant
+
+Only active when `network.enabled` and a WiFi SSID are set; otherwise the
+station is never started and the radio stays BLE-only.
+
+| Topic | Payload | Retained |
+|---|---|---|
+| `<prefix>/binary_sensor/roomtrack_<node>_<zone>/config` | discovery JSON | yes |
+| `<base>/<node>/zone/<zone>/state` | `ON` / `OFF` | yes |
+| `<base>/<node>/availability` | `online` / `offline` | yes (LWT) |
+
+`<zone>` is the zone id slugified to `[a-z0-9_-]`, since Home Assistant object
+ids do not accept free text.
+
+State is **retained** so Home Assistant recovers the current picture on restart
+rather than waiting for someone to walk through a room. Availability is an MQTT
+last will, so a board that drops off shows as unavailable instead of as an
+empty room. Every zone shares one `device` block in its discovery payload, so
+the entities group under a single device.
+
+Removing a zone publishes an **empty retained payload** to its discovery topic,
+which is how Home Assistant is told to delete an entity; without it the entity
+outlives the box that created it.
+
+---
 
 ### Zone state machine
 

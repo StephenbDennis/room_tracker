@@ -7,11 +7,15 @@ idf_component_register(
         "config.c"
         "actions.c"
         "ble_gatt.c"
+        "net_ha.c"
     INCLUDE_DIRS "."
     REQUIRES
         esp_timer
         nvs_flash
         bt
+        esp_wifi
+        esp_netif
+        esp_event
     # IDF v6.0 split the monolithic `driver` component; UART and GPIO now come
     # from their own components and are only used from .c files here.
     PRIV_REQUIRES

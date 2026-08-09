@@ -45,6 +45,7 @@ firmware/          ESP-IDF project
     config.c       JSON <-> struct, NVS
     actions.c      GPIO outputs
     ble_gatt.c     NimBLE server
+    net_ha.c       WiFi + MQTT reporting to Home Assistant
     app_main.c     wiring and the 10 Hz loop
   test/            host tests, plain gcc
 docs/              Vite + TypeScript + React configurator
@@ -111,6 +112,25 @@ such as an action type beyond GPIO.
 
 The device panel shows the board's stored config version, so an edit that never
 reached it shows up as a badge rather than a silent inconsistency.
+
+### Home Assistant
+
+Optional, and off until you fill it in — with reporting disabled the radio
+stays BLE-only.
+
+1. In the web app, open **Home Assistant**, tick *Report zones over MQTT*, and
+   enter the WiFi network and your broker (`mqtt://homeassistant.local:1883`).
+2. Push the config, then reboot the board: network settings are read at start.
+3. Each event box appears in Home Assistant as an occupancy `binary_sensor`,
+   grouped under one device, via MQTT discovery. No YAML.
+
+State is retained, so Home Assistant recovers the current picture on restart
+instead of waiting for someone to walk through the room, and an MQTT last will
+marks the node unavailable if it drops off rather than reporting an empty room.
+
+Passwords are write-only: the device serves a redacted config over BLE and
+reports only whether one is stored, so anyone in Bluetooth range during the
+config window cannot read your WiFi password back out.
 
 ### Tuning that matters
 

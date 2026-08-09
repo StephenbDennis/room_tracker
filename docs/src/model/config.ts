@@ -66,15 +66,45 @@ export interface FusionCfg {
   stopped_hold_ms: number;
 }
 
+/* Passwords are write-only. The device serves a redacted config over BLE, so
+ * it reports whether one is stored rather than its value; sending an empty
+ * string keeps whatever the device already has. */
+export interface NetworkCfg {
+  enabled: boolean;
+  wifi_ssid: string;
+  wifi_pass: string;
+  mqtt_uri: string;
+  mqtt_user: string;
+  mqtt_pass: string;
+  base_topic: string;
+  discovery_prefix: string;
+  wifi_pass_set?: boolean;
+  mqtt_pass_set?: boolean;
+}
+
 export interface RoomConfig {
   version: number;
   room: { w_mm: number; h_mm: number };
   sensor: SensorPose;
   zones: Zone[];
   fusion: FusionCfg;
+  network: NetworkCfg;
 }
 
 export const MAX_ZONES = 16;
+
+export function defaultNetwork(): NetworkCfg {
+  return {
+    enabled: false,
+    wifi_ssid: '',
+    wifi_pass: '',
+    mqtt_uri: 'mqtt://homeassistant.local:1883',
+    mqtt_user: '',
+    mqtt_pass: '',
+    base_topic: 'roomtrack',
+    discovery_prefix: 'homeassistant',
+  };
+}
 
 export function defaultFusion(): FusionCfg {
   return {
@@ -95,6 +125,7 @@ export function defaultConfig(): RoomConfig {
     sensor: { x_mm: 2500, y_mm: 0, theta_deg: 90 },
     zones: [],
     fusion: defaultFusion(),
+    network: defaultNetwork(),
   };
 }
 
@@ -141,6 +172,7 @@ export function validateConfig(cfg: unknown): cfg is RoomConfig {
     return false;
   }
   if (typeof c.sensor.theta_deg !== 'number') return false;
+  if (!c.network) c.network = defaultNetwork();
   for (const z of c.zones) {
     if (typeof z.id !== 'string' || !z.rect) return false;
     if (typeof z.rect.cx !== 'number' || typeof z.rect.w !== 'number') return false;

@@ -17,6 +17,24 @@ void config_defaults(room_config_t *cfg)
     cfg->room_w_mm = 5000.0f;
     cfg->room_h_mm = 4000.0f;
     fusion_default_cfg(&cfg->fusion);
+
+    cfg->network.enabled = false;
+    strcpy(cfg->network.base_topic, "roomtrack");
+    strcpy(cfg->network.discovery_prefix, "homeassistant");
+}
+
+static void carry(char *dst, size_t cap, const char *src)
+{
+    if (dst[0] == '\0' && src[0] != '\0') {
+        strncpy(dst, src, cap - 1);
+        dst[cap - 1] = '\0';
+    }
+}
+
+void config_carry_secrets(room_config_t *incoming, const room_config_t *current)
+{
+    carry(incoming->network.wifi_pass, NET_PASS_LEN, current->network.wifi_pass);
+    carry(incoming->network.mqtt_pass, NET_PASS_LEN, current->network.mqtt_pass);
 }
 
 /* ---------- JSON ---------- */
@@ -157,6 +175,23 @@ bool config_from_json(const char *json, size_t len, room_config_t *out)
                                (float)out->fusion.stopped_hold_ms);
     }
 
+    const cJSON *net = cJSON_GetObjectItemCaseSensitive(root, "network");
+    if (cJSON_IsObject(net)) {
+        network_cfg_t *n = &out->network;
+        n->enabled = json_bool(net, "enabled", false);
+        json_str(net, "wifi_ssid", n->wifi_ssid, NET_SSID_LEN);
+        json_str(net, "wifi_pass", n->wifi_pass, NET_PASS_LEN);
+        json_str(net, "mqtt_uri",  n->mqtt_uri,  NET_URI_LEN);
+        json_str(net, "mqtt_user", n->mqtt_user, NET_USER_LEN);
+        json_str(net, "mqtt_pass", n->mqtt_pass, NET_PASS_LEN);
+
+        char t[NET_TOPIC_LEN];
+        json_str(net, "base_topic", t, sizeof t);
+        if (t[0]) strcpy(n->base_topic, t);
+        json_str(net, "discovery_prefix", t, sizeof t);
+        if (t[0]) strcpy(n->discovery_prefix, t);
+    }
+
     cJSON_Delete(root);
     return true;
 }
@@ -169,7 +204,8 @@ static const char *state_mask_name(uint8_t mask)
     return "any";
 }
 
-size_t config_to_json(const room_config_t *cfg, char *out, size_t cap)
+size_t config_to_json(const room_config_t *cfg, char *out, size_t cap,
+                      config_json_mode_t mode)
 {
     cJSON *root = cJSON_CreateObject();
     if (!root) return 0;
@@ -237,6 +273,25 @@ size_t config_to_json(const room_config_t *cfg, char *out, size_t cap)
     cJSON_AddNumberToObject(fz, "stopped_thresh_mms", cfg->fusion.stopped_thresh_mms);
     cJSON_AddNumberToObject(fz, "stopped_hold_ms", cfg->fusion.stopped_hold_ms);
 
+    const network_cfg_t *n = &cfg->network;
+    cJSON *net = cJSON_AddObjectToObject(root, "network");
+    cJSON_AddBoolToObject(net, "enabled", n->enabled);
+    cJSON_AddStringToObject(net, "wifi_ssid", n->wifi_ssid);
+    cJSON_AddStringToObject(net, "mqtt_uri", n->mqtt_uri);
+    cJSON_AddStringToObject(net, "mqtt_user", n->mqtt_user);
+    cJSON_AddStringToObject(net, "base_topic", n->base_topic);
+    cJSON_AddStringToObject(net, "discovery_prefix", n->discovery_prefix);
+
+    if (mode == CONFIG_JSON_WITH_SECRETS) {
+        cJSON_AddStringToObject(net, "wifi_pass", n->wifi_pass);
+        cJSON_AddStringToObject(net, "mqtt_pass", n->mqtt_pass);
+    } else {
+        /* Report only whether a password is stored, never the value. The
+         * webpage shows "saved" and sends an empty string to keep it. */
+        cJSON_AddBoolToObject(net, "wifi_pass_set", n->wifi_pass[0] != '\0');
+        cJSON_AddBoolToObject(net, "mqtt_pass_set", n->mqtt_pass[0] != '\0');
+    }
+
     char *s = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
     if (!s) return 0;
@@ -299,7 +354,8 @@ bool config_save(const room_config_t *cfg)
     char *buf = malloc(CONFIG_JSON_MAX);
     if (!buf) return false;
 
-    size_t n = config_to_json(cfg, buf, CONFIG_JSON_MAX);
+    size_t n = config_to_json(cfg, buf, CONFIG_JSON_MAX,
+                              CONFIG_JSON_WITH_SECRETS);
     if (n == 0) {
         free(buf);
         return false;

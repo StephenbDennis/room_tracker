@@ -23,6 +23,7 @@
 #include "config.h"
 #include "fusion.h"
 #include "ld2450.h"
+#include "net_ha.h"
 #include "zones.h"
 
 static const char *TAG = "app";
@@ -62,10 +63,14 @@ static void apply_config(void)
 
     char *json = malloc(CONFIG_JSON_MAX);
     if (json) {
-        size_t n = config_to_json(&s_cfg, json, CONFIG_JSON_MAX);
+        /* Redacted: this copy is served over BLE to anything that can reach
+         * CONFIG_READ, so it must not carry the WiFi or broker passwords. */
+        size_t n = config_to_json(&s_cfg, json, CONFIG_JSON_MAX,
+                                  CONFIG_JSON_REDACTED);
         if (n) ble_gatt_set_config_json(json, n);
         free(json);
     }
+    net_ha_apply_config(&s_cfg);
     ESP_LOGI(TAG, "config v%u applied: %u zones",
              (unsigned)s_cfg.version, s_cfg.zone_count);
 }
@@ -83,6 +88,10 @@ static bool on_config_written(const char *json, size_t len)
         ESP_LOGW(TAG, "rejected malformed config");
         return false;
     }
+    /* The webpage never receives the stored passwords, so it cannot echo them
+     * back; without this every push from the UI would wipe them. */
+    config_carry_secrets(&incoming, &s_cfg);
+
     s_cfg = incoming;
     if (!config_save(&s_cfg)) {
         ESP_LOGW(TAG, "config accepted but NVS write failed");
@@ -164,7 +173,7 @@ static void ld2450_configure(void)
     send_ld2450_command(LD2450_CMD_ENABLE_CONFIG, on, 2);
     send_ld2450_command(LD2450_CMD_MULTI_TARGET, NULL, 0);
     /* The module's own Bluetooth is a needless 2.4 GHz emitter competing with
-     * the ESP32's radio, which already has BLE and ESP-NOW to schedule. */
+     * the ESP32's own radio. */
     send_ld2450_command(LD2450_CMD_BLUETOOTH, off, 2);
     send_ld2450_command(LD2450_CMD_END_CONFIG, NULL, 0);
 
@@ -234,6 +243,7 @@ static void tracker_task(void *arg)
         for (uint8_t i = 0; i < n_events; i++) {
             uint8_t zi = events[i].zone_index;
             actions_on_zone_change(&s_cfg.zones[zi], zi, events[i].active, t);
+            net_ha_publish_zone(&s_cfg.zones[zi], events[i].active);
             ESP_LOGI(TAG, "zone '%s' %s (%u inside)",
                      s_cfg.zones[zi].name,
                      events[i].active ? "TRIGGERED" : "released",
@@ -291,6 +301,7 @@ void app_main(void)
         .on_command = on_command,
     };
     ble_gatt_init(s_node_name, &cbs);
+    net_ha_init(&s_cfg, s_node_id);
 
     apply_config();
 
