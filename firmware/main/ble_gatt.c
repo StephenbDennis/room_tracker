@@ -64,7 +64,10 @@ static int chr_config_write(uint16_t conn, uint16_t attr,
         return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
     }
 
-    uint8_t buf[512];
+    /* Static for the same reason as the config struct in app_main: this runs
+     * on the NimBLE host task's 4 kB stack, and the ATT MTU allows a write
+     * this large. Serialised on that task, so one buffer is enough. */
+    static uint8_t buf[512];
     if (len > sizeof buf) {
         return BLE_ATT_ERR_INVALID_ATTR_VALUE_LEN;
     }

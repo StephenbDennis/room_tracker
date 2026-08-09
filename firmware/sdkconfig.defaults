@@ -15,6 +15,11 @@ CONFIG_BT_NIMBLE_MAX_CONNECTIONS=1
 CONFIG_BT_NIMBLE_ATT_PREFERRED_MTU=517
 CONFIG_BT_NIMBLE_GATT_MAX_PROCS=8
 
+# A config write is handled synchronously on the host task: cJSON parses the
+# blob recursively and NVS commits it, both from inside the GATT callback. The
+# 4 kB default leaves no margin for that.
+CONFIG_BT_NIMBLE_HOST_TASK_STACK_SIZE=6144
+
 # --- WiFi ---
 # Nothing uses the WiFi radio: one board per room, so there are no peers to
 # talk to and BLE is the only link. Leaving it out frees the radio entirely,

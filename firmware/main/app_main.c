@@ -72,7 +72,13 @@ static void apply_config(void)
 
 static bool on_config_written(const char *json, size_t len)
 {
-    room_config_t incoming;
+    /* Static, not a local: room_config_t is ~2.5 kB and this runs on the
+     * NimBLE host task, whose whole stack is 4 kB. As a local it left no room
+     * for cJSON's recursive parse and the NVS write below, and overflowed the
+     * task. Safe as a static because GATT callbacks are serialised on that one
+     * task, so there is never a second call in flight. */
+    static room_config_t incoming;
+
     if (!config_from_json(json, len, &incoming)) {
         ESP_LOGW(TAG, "rejected malformed config");
         return false;
