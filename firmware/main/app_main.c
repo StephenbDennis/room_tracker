@@ -1,7 +1,8 @@
-/* Room tracker node: LD2450 -> fusion -> zones -> GPIO, with BLE for
+/* Room tracker: LD2450 -> tracking -> zones -> GPIO, with BLE for
  * configuration and visualisation.
  *
- * The zone engine and its outputs run entirely here. The webpage is a client:
+ * One board per room, owning that room's sensor, zones and outputs. The zone
+ * engine and its outputs run entirely here; the webpage is a client, and
  * disconnecting it must not change what the GPIO pins do. */
 
 #include <stdio.h>
@@ -20,7 +21,6 @@
 #include "actions.h"
 #include "ble_gatt.h"
 #include "config.h"
-#include "espnow_link.h"
 #include "fusion.h"
 #include "ld2450.h"
 #include "zones.h"
@@ -35,7 +35,6 @@ static const char *TAG = "app";
 
 #define UART_BUF_SIZE      1024
 #define TICK_PERIOD_MS     100    /* the LD2450 reports at 10 Hz */
-#define HEARTBEAT_MS       3000
 #define STATUS_MS          1000
 #define CONFIG_MODE_MS     (5 * 60 * 1000)
 
@@ -59,7 +58,7 @@ static void apply_config(void)
     fusion_init(&s_fusion, &s_cfg.fusion);
     memset(s_zone_states, 0, sizeof s_zone_states);
     actions_all_off();
-    actions_init(&s_cfg, s_node_id);
+    actions_init(&s_cfg);
 
     char *json = malloc(CONFIG_JSON_MAX);
     if (json) {
@@ -67,8 +66,8 @@ static void apply_config(void)
         if (n) ble_gatt_set_config_json(json, n);
         free(json);
     }
-    ESP_LOGI(TAG, "config v%u applied: %u nodes, %u zones",
-             (unsigned)s_cfg.version, s_cfg.node_count, s_cfg.zone_count);
+    ESP_LOGI(TAG, "config v%u applied: %u zones",
+             (unsigned)s_cfg.version, s_cfg.zone_count);
 }
 
 static bool on_config_written(const char *json, size_t len)
@@ -131,6 +130,14 @@ static void uart_init(void)
     ESP_ERROR_CHECK(uart_param_config(LD2450_UART, &cfg));
     ESP_ERROR_CHECK(uart_set_pin(LD2450_UART, LD2450_TX_PIN, LD2450_RX_PIN,
                                  UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE));
+
+    /* uart_set_pin() only routes the signal; it leaves the pull resistors
+     * alone. An unpowered or disconnected LD2450 therefore leaves RX floating,
+     * and the drifting input keeps tripping the start-bit detector -- which
+     * reads as a steady trickle of rail-to-rail bytes that is easy to mistake
+     * for real data at the wrong baud. Idle-high makes "nothing connected"
+     * report as silence instead. */
+    ESP_ERROR_CHECK(gpio_set_pull_mode(LD2450_RX_PIN, GPIO_PULLUP_ONLY));
 }
 
 static void send_ld2450_command(uint16_t word, const uint8_t *value, size_t vlen)
@@ -188,48 +195,31 @@ static bool read_latest_frame(ld2450_frame_t *out)
 
 static void tracker_task(void *arg)
 {
-    uint32_t last_hb = 0, last_status = 0;
-    detection_t all[FUSION_MAX_DETECTIONS];
+    uint32_t last_status = 0;
+    detection_t dets[FUSION_MAX_DETECTIONS];
     track_t     tracks[ROOM_MAX_TRACKS];
     zone_event_t events[ROOM_MAX_ZONES];
-    peer_info_t peers[ROOM_MAX_NODES];
 
     for (;;) {
         uint32_t t = now_ms();
 
-        /* Config mode closes automatically so a node left on a wall is not
+        /* Config mode closes automatically so a board left on a wall is not
          * permanently open to reconfiguration by anyone in range. */
         bool button = gpio_get_level(CONFIG_BUTTON_PIN) == 0;
         ble_gatt_set_config_mode(button || t < CONFIG_MODE_MS);
 
-        uint8_t n_all = 0;
-        int self_idx = config_find_node(&s_cfg, s_node_id);
+        uint8_t n_dets = 0;
 
         ld2450_frame_t frame;
-        if (read_latest_frame(&frame) && self_idx >= 0) {
-            const node_pose_t *pose = &s_cfg.nodes[self_idx];
-            detection_t mine[LD2450_MAX_TARGETS];
-            uint8_t n_mine = 0;
-
-            if (pose->enabled) {
-                for (uint8_t i = 0; i < frame.count; i++) {
-                    fusion_transform(pose, &frame.targets[i],
-                                     (uint8_t)self_idx, &mine[n_mine++]);
-                }
-            }
-
-            espnow_link_broadcast_detections(mine, n_mine, s_seq++);
-            for (uint8_t i = 0; i < n_mine && n_all < FUSION_MAX_DETECTIONS; i++) {
-                all[n_all++] = mine[i];
+        if (read_latest_frame(&frame)) {
+            for (uint8_t i = 0; i < frame.count &&
+                                n_dets < FUSION_MAX_DETECTIONS; i++) {
+                fusion_transform(&s_cfg.sensor, &frame.targets[i],
+                                 &dets[n_dets++]);
             }
         }
 
-        /* Merge in whatever the peers last reported, ignoring stale sets. */
-        n_all += espnow_link_collect_detections(all + n_all,
-                                                FUSION_MAX_DETECTIONS - n_all,
-                                                t, ESPNOW_DET_MAX_AGE_MS);
-
-        fusion_update(&s_fusion, all, n_all, t);
+        fusion_update(&s_fusion, dets, n_dets, t);
         uint8_t n_tracks = fusion_get_tracks(&s_fusion, tracks, ROOM_MAX_TRACKS);
 
         uint8_t n_events = zones_update_all(s_cfg.zones, s_zone_states,
@@ -245,22 +235,16 @@ static void tracker_task(void *arg)
         }
         actions_tick(t);
 
-        ble_gatt_notify_tracks(tracks, n_tracks, s_seq);
+        ble_gatt_notify_tracks(tracks, n_tracks, s_seq++);
         if (n_events > 0) {
             ble_gatt_notify_zone_state(s_cfg.zones, s_zone_states,
                                        s_cfg.zone_count);
         }
 
-        if (t - last_hb >= HEARTBEAT_MS) {
-            last_hb = t;
-            espnow_link_send_heartbeat(s_cfg.version, t / 1000);
-        }
         if (t - last_status >= STATUS_MS) {
             last_status = t;
-            uint8_t np = espnow_link_get_peers(peers, ROOM_MAX_NODES);
             ble_gatt_set_status(s_node_id, s_node_name, s_cfg.version,
-                                t / 1000, ble_gatt_is_connected(),
-                                peers, np, t);
+                                t / 1000, ble_gatt_is_connected());
         }
 
         vTaskDelay(pdMS_TO_TICKS(TICK_PERIOD_MS));
@@ -293,21 +277,8 @@ void app_main(void)
 
     config_load(&s_cfg);
 
-    /* If this node is not yet in the room layout, add it so it can still
-     * report itself and be placed from the webpage. */
-    if (config_find_node(&s_cfg, s_node_id) < 0 &&
-        s_cfg.node_count < ROOM_MAX_NODES) {
-        node_pose_t *n = &s_cfg.nodes[s_cfg.node_count++];
-        memset(n, 0, sizeof *n);
-        strncpy(n->id, s_node_id, ROOM_ID_LEN - 1);
-        n->enabled = true;
-        ESP_LOGI(TAG, "registered self in room layout at origin");
-    }
-
     uart_init();
     ld2450_configure();
-
-    espnow_link_init(s_node_id, s_node_name, ESPNOW_CHANNEL_DEFAULT);
 
     ble_gatt_cbs_t cbs = {
         .on_config  = on_config_written,

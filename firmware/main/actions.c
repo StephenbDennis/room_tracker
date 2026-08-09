@@ -19,7 +19,6 @@ typedef struct {
 
 static pin_state_t s_pins[MAX_PINS];
 static uint8_t     s_pin_count;
-static char        s_self_id[ROOM_ID_LEN];
 
 static pin_state_t *find_pin(uint8_t pin)
 {
@@ -66,23 +65,20 @@ static void drive(pin_state_t *p)
     gpio_set_level(p->pin, on ? p->active_level : !p->active_level);
 }
 
-void actions_init(const room_config_t *cfg, const char *self_node_id)
+void actions_init(const room_config_t *cfg)
 {
     memset(s_pins, 0, sizeof s_pins);
     s_pin_count = 0;
-    strncpy(s_self_id, self_node_id, ROOM_ID_LEN - 1);
-    s_self_id[ROOM_ID_LEN - 1] = '\0';
 
     for (uint8_t i = 0; i < cfg->zone_count; i++) {
         const zone_cfg_t *z = &cfg->zones[i];
         for (uint8_t j = 0; j < z->action_count; j++) {
             const zone_action_t *a = &z->actions[j];
             if (a->type != ACTION_GPIO) continue;
-            if (strncmp(a->node_id, s_self_id, ROOM_ID_LEN) != 0) continue;
             register_pin(a->pin, a->active_level);
         }
     }
-    ESP_LOGI(TAG, "node %s owns %u output pin(s)", s_self_id, s_pin_count);
+    ESP_LOGI(TAG, "%u output pin(s) configured", s_pin_count);
 }
 
 void actions_on_zone_change(const zone_cfg_t *z, uint8_t zone_index,
@@ -95,7 +91,6 @@ void actions_on_zone_change(const zone_cfg_t *z, uint8_t zone_index,
     for (uint8_t j = 0; j < z->action_count; j++) {
         const zone_action_t *a = &z->actions[j];
         if (a->type != ACTION_GPIO) continue;
-        if (strncmp(a->node_id, s_self_id, ROOM_ID_LEN) != 0) continue;
 
         pin_state_t *p = register_pin(a->pin, a->active_level);
         if (!p) continue;

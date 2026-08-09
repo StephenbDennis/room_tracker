@@ -18,7 +18,6 @@ static inline float dist2(float ax, float ay, float bx, float by)
 
 void fusion_default_cfg(fusion_cfg_t *cfg)
 {
-    cfg->merge_radius_mm    = 500.0f;
     cfg->assoc_gate_mm      = 800.0f;
     cfg->coast_ms           = 1000;
     cfg->confirm_frames     = 2;
@@ -40,8 +39,8 @@ void fusion_init(fusion_t *f, const fusion_cfg_t *cfg)
     f->next_id = 1;   /* 0 is reserved as "no track" */
 }
 
-void fusion_transform(const node_pose_t *pose, const ld2450_target_t *t,
-                      uint8_t node_index, detection_t *out)
+void fusion_transform(const sensor_pose_t *pose, const ld2450_target_t *t,
+                      detection_t *out)
 {
     float rad = (float)(pose->theta_deg * M_PI / 180.0);
     float c = cosf(rad), s = sinf(rad);
@@ -53,69 +52,8 @@ void fusion_transform(const node_pose_t *pose, const ld2450_target_t *t,
     out->x_mm = pose->x_mm + ly * c + lx * s;
     out->y_mm = pose->y_mm + ly * s - lx * c;
 
-    out->speed_cms  = (float)t->speed_cms;
-    out->range_mm   = sqrtf(lx * lx + ly * ly);
-    out->node_index = node_index;
-}
-
-uint8_t fusion_merge(const detection_t *in, uint8_t in_count,
-                     float merge_radius_mm, detection_t *out, uint8_t out_cap)
-{
-    bool taken[FUSION_MAX_DETECTIONS] = { false };
-    float r2 = merge_radius_mm * merge_radius_mm;
-    uint8_t n_out = 0;
-
-    if (in_count > FUSION_MAX_DETECTIONS) {
-        in_count = FUSION_MAX_DETECTIONS;
-    }
-
-    for (uint8_t i = 0; i < in_count && n_out < out_cap; i++) {
-        if (taken[i]) {
-            continue;
-        }
-        taken[i] = true;
-
-        /* Weight by 1/range: a sensor 1 m from the target is trusted more than
-         * one 5 m away, because LD2450 positional error grows with distance. */
-        float w  = 1.0f / (in[i].range_mm > 1.0f ? in[i].range_mm : 1.0f);
-        float sx = in[i].x_mm * w;
-        float sy = in[i].y_mm * w;
-        float sw = w;
-        float best_speed = in[i].speed_cms;
-        float min_range  = in[i].range_mm;
-
-        for (uint8_t j = i + 1; j < in_count; j++) {
-            if (taken[j]) {
-                continue;
-            }
-            /* Cluster against the seed rather than a moving centroid, so the
-             * result does not depend on input ordering. */
-            if (dist2(in[i].x_mm, in[i].y_mm, in[j].x_mm, in[j].y_mm) > r2) {
-                continue;
-            }
-            taken[j] = true;
-
-            float wj = 1.0f / (in[j].range_mm > 1.0f ? in[j].range_mm : 1.0f);
-            sx += in[j].x_mm * wj;
-            sy += in[j].y_mm * wj;
-            sw += wj;
-
-            /* Keep the speed from the closest contributing sensor. */
-            if (in[j].range_mm < min_range) {
-                min_range  = in[j].range_mm;
-                best_speed = in[j].speed_cms;
-            }
-        }
-
-        out[n_out].x_mm       = sx / sw;
-        out[n_out].y_mm       = sy / sw;
-        out[n_out].speed_cms  = best_speed;
-        out[n_out].range_mm   = min_range;
-        out[n_out].node_index = in[i].node_index;
-        n_out++;
-    }
-
-    return n_out;
+    out->speed_cms = (float)t->speed_cms;
+    out->range_mm  = sqrtf(lx * lx + ly * ly);
 }
 
 static fusion_track_t *alloc_track(fusion_t *f)
@@ -161,9 +99,8 @@ static void classify_motion(const fusion_cfg_t *cfg, fusion_track_t *tr,
 void fusion_update(fusion_t *f, const detection_t *dets, uint8_t det_count,
                    uint32_t now_ms)
 {
-    detection_t merged[FUSION_MAX_DETECTIONS];
-    uint8_t n = fusion_merge(dets, det_count, f->cfg.merge_radius_mm,
-                             merged, FUSION_MAX_DETECTIONS);
+    uint8_t n = det_count > FUSION_MAX_DETECTIONS ? FUSION_MAX_DETECTIONS
+                                                  : det_count;
 
     float dt = 0.1f;
     if (f->started) {
@@ -196,7 +133,7 @@ void fusion_update(fusion_t *f, const detection_t *dets, uint8_t det_count,
             for (uint8_t di = 0; di < n; di++) {
                 if (det_used[di]) continue;
                 float d2 = dist2(f->tracks[ti].pub.x_mm, f->tracks[ti].pub.y_mm,
-                                 merged[di].x_mm, merged[di].y_mm);
+                                 dets[di].x_mm, dets[di].y_mm);
                 if (d2 < best) {
                     best = d2;
                     bt = ti;
@@ -212,7 +149,7 @@ void fusion_update(fusion_t *f, const detection_t *dets, uint8_t det_count,
         det_used[bd] = true;
 
         fusion_track_t *tr = &f->tracks[bt];
-        const detection_t *z = &merged[bd];
+        const detection_t *z = &dets[bd];
 
         /* alpha-beta correction against the prediction */
         float rx = z->x_mm - tr->pub.x_mm;
@@ -238,8 +175,8 @@ void fusion_update(fusion_t *f, const detection_t *dets, uint8_t det_count,
         fusion_track_t *tr = alloc_track(f);
         if (!tr) break;   /* track table full; drop the extra detection */
 
-        tr->pub.x_mm   = merged[di].x_mm;
-        tr->pub.y_mm   = merged[di].y_mm;
+        tr->pub.x_mm   = dets[di].x_mm;
+        tr->pub.y_mm   = dets[di].y_mm;
         tr->pub.vx_mms = 0.0f;
         tr->pub.vy_mms = 0.0f;
         tr->pub.motion = MOTION_UNKNOWN;

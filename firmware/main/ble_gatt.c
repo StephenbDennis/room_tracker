@@ -13,12 +13,13 @@
 
 static const char *TAG = "ble";
 
-/* Base f0d2a450-1e4b-4c3a-9d1f-00000000000N. NimBLE takes 128-bit UUIDs
- * little-endian, so the byte arrays below read backwards. */
+/* Base f0d2a450-1e4b-4c3a-9d1f-0000000000NN, matching docs/src/ble/uuids.ts.
+ * NimBLE stores 128-bit UUIDs little-endian, so the array below is the UUID
+ * byte-reversed: `last` comes first and the f0-d2 prefix comes last. */
 #define UUID128_BASE(last)                                        \
-    BLE_UUID128_INIT(0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,     \
-                     (last), 0x1f, 0x9d, 0x3a, 0x4c, 0x4b, 0x1e,   \
-                     0x50, 0xa4)
+    BLE_UUID128_INIT((last), 0x00, 0x00, 0x00, 0x00, 0x00,        \
+                     0x1f, 0x9d, 0x3a, 0x4c, 0x4b, 0x1e,          \
+                     0x50, 0xa4, 0xd2, 0xf0)
 
 static const ble_uuid128_t SVC_UUID          = UUID128_BASE(0x00);
 static const ble_uuid128_t CHR_CONFIG_WRITE  = UUID128_BASE(0x01);
@@ -221,19 +222,31 @@ static int gap_event(struct ble_gap_event *event, void *arg)
 
 static void advertise(void)
 {
+    /* A legacy advertisement carries 31 bytes. Flags (3) plus the full 128-bit
+     * service UUID (18) leaves 10, which "node-xxxxxx" does not fit into. The
+     * UUID has to stay here because the web client scans with a service filter,
+     * so the name rides in the scan response instead. */
     struct ble_hs_adv_fields fields = {0};
-    const char *name = ble_svc_gap_device_name();
-
     fields.flags = BLE_HS_ADV_F_DISC_GEN | BLE_HS_ADV_F_BREDR_UNSUP;
-    fields.name = (uint8_t *)name;
-    fields.name_len = strlen(name);
-    fields.name_is_complete = 1;
     fields.uuids128 = (ble_uuid128_t *)&SVC_UUID;
     fields.num_uuids128 = 1;
     fields.uuids128_is_complete = 1;
 
-    if (ble_gap_adv_set_fields(&fields) != 0) {
-        ESP_LOGE(TAG, "failed to set advertisement fields");
+    int rc = ble_gap_adv_set_fields(&fields);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "failed to set advertisement fields (rc %d)", rc);
+        return;
+    }
+
+    const char *name = ble_svc_gap_device_name();
+    struct ble_hs_adv_fields rsp = {0};
+    rsp.name = (uint8_t *)name;
+    rsp.name_len = strlen(name);
+    rsp.name_is_complete = 1;
+
+    rc = ble_gap_adv_rsp_set_fields(&rsp);
+    if (rc != 0) {
+        ESP_LOGE(TAG, "failed to set scan response fields (rc %d)", rc);
         return;
     }
 
@@ -350,29 +363,15 @@ void ble_gatt_notify_zone_state(const zone_cfg_t *zones,
 
 void ble_gatt_set_status(const char *node_id, const char *name,
                          uint32_t config_version, uint32_t uptime_s,
-                         bool config_mode, const peer_info_t *peers,
-                         uint8_t peer_count, uint32_t now_ms)
+                         bool config_mode)
 {
-    /* JSON: STATUS is read rarely and carries a variable peer list, so
-     * legibility beats compactness here. */
+    /* JSON: STATUS is read rarely, so legibility beats compactness here. */
     int n = snprintf(s_status, sizeof s_status,
         "{\"node_id\":\"%s\",\"name\":\"%s\",\"config_version\":%u,"
-        "\"uptime_s\":%u,\"config_mode\":%s,\"peers\":[",
+        "\"uptime_s\":%u,\"config_mode\":%s}",
         node_id, name, (unsigned)config_version, (unsigned)uptime_s,
         config_mode ? "true" : "false");
 
-    for (uint8_t i = 0; i < peer_count && n > 0 && n < (int)sizeof s_status; i++) {
-        uint32_t age_ms = now_ms - peers[i].last_seen_ms;
-        n += snprintf(s_status + n, sizeof s_status - n,
-            "%s{\"id\":\"%s\",\"name\":\"%s\",\"config_version\":%u,"
-            "\"age_ms\":%u,\"rssi\":%d}",
-            i ? "," : "", peers[i].id, peers[i].name,
-            (unsigned)peers[i].config_version, (unsigned)age_ms, peers[i].rssi);
-    }
-
-    if (n > 0 && n < (int)sizeof s_status) {
-        n += snprintf(s_status + n, sizeof s_status - n, "]}");
-    }
     s_status_len = (n > 0 && n < (int)sizeof s_status) ? (size_t)n : 0;
 
     if (ble_gatt_is_connected() && s_status_len > 0) {

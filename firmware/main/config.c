@@ -19,16 +19,6 @@ void config_defaults(room_config_t *cfg)
     fusion_default_cfg(&cfg->fusion);
 }
 
-int config_find_node(const room_config_t *cfg, const char *node_id)
-{
-    for (uint8_t i = 0; i < cfg->node_count; i++) {
-        if (strncmp(cfg->nodes[i].id, node_id, ROOM_ID_LEN) == 0) {
-            return i;
-        }
-    }
-    return -1;
-}
-
 /* ---------- JSON ---------- */
 
 static float json_num(const cJSON *o, const char *key, float dflt)
@@ -96,18 +86,14 @@ bool config_from_json(const char *json, size_t len, room_config_t *out)
         out->room_h_mm = json_num(room, "h_mm", 4000.0f);
     }
 
-    const cJSON *nodes = cJSON_GetObjectItemCaseSensitive(root, "nodes");
-    const cJSON *it = NULL;
-    cJSON_ArrayForEach(it, nodes) {
-        if (out->node_count >= ROOM_MAX_NODES) break;
-        node_pose_t *n = &out->nodes[out->node_count++];
-        json_str(it, "id", n->id, ROOM_ID_LEN);
-        n->x_mm      = json_num(it, "x_mm", 0);
-        n->y_mm      = json_num(it, "y_mm", 0);
-        n->theta_deg = json_num(it, "theta_deg", 0);
-        n->enabled   = json_bool(it, "enabled", true);
+    const cJSON *sensor = cJSON_GetObjectItemCaseSensitive(root, "sensor");
+    if (cJSON_IsObject(sensor)) {
+        out->sensor.x_mm      = json_num(sensor, "x_mm", 0);
+        out->sensor.y_mm      = json_num(sensor, "y_mm", 0);
+        out->sensor.theta_deg = json_num(sensor, "theta_deg", 0);
     }
 
+    const cJSON *it = NULL;
     const cJSON *zones = cJSON_GetObjectItemCaseSensitive(root, "zones");
     cJSON_ArrayForEach(it, zones) {
         if (out->zone_count >= ROOM_MAX_ZONES) break;
@@ -147,7 +133,6 @@ bool config_from_json(const char *json, size_t len, room_config_t *out)
             if (z->action_count >= ZONE_MAX_ACTIONS) break;
             zone_action_t *act = &z->actions[z->action_count++];
             act->type = ACTION_GPIO;
-            json_str(a, "node_id", act->node_id, ROOM_ID_LEN);
             act->pin          = (uint8_t)json_num(a, "pin", 0);
             act->active_level = (uint8_t)json_num(a, "active_level", 1);
             act->pulse_ms     = (uint32_t)json_num(a, "pulse_ms", 0);
@@ -159,8 +144,6 @@ bool config_from_json(const char *json, size_t len, room_config_t *out)
 
     const cJSON *fz = cJSON_GetObjectItemCaseSensitive(root, "fusion");
     if (cJSON_IsObject(fz)) {
-        out->fusion.merge_radius_mm =
-            json_num(fz, "merge_radius_mm", out->fusion.merge_radius_mm);
         out->fusion.assoc_gate_mm =
             json_num(fz, "assoc_gate_mm", out->fusion.assoc_gate_mm);
         out->fusion.coast_ms =
@@ -197,17 +180,10 @@ size_t config_to_json(const room_config_t *cfg, char *out, size_t cap)
     cJSON_AddNumberToObject(room, "w_mm", cfg->room_w_mm);
     cJSON_AddNumberToObject(room, "h_mm", cfg->room_h_mm);
 
-    cJSON *nodes = cJSON_AddArrayToObject(root, "nodes");
-    for (uint8_t i = 0; i < cfg->node_count; i++) {
-        const node_pose_t *n = &cfg->nodes[i];
-        cJSON *o = cJSON_CreateObject();
-        cJSON_AddStringToObject(o, "id", n->id);
-        cJSON_AddNumberToObject(o, "x_mm", n->x_mm);
-        cJSON_AddNumberToObject(o, "y_mm", n->y_mm);
-        cJSON_AddNumberToObject(o, "theta_deg", n->theta_deg);
-        cJSON_AddBoolToObject(o, "enabled", n->enabled);
-        cJSON_AddItemToArray(nodes, o);
-    }
+    cJSON *sensor = cJSON_AddObjectToObject(root, "sensor");
+    cJSON_AddNumberToObject(sensor, "x_mm", cfg->sensor.x_mm);
+    cJSON_AddNumberToObject(sensor, "y_mm", cfg->sensor.y_mm);
+    cJSON_AddNumberToObject(sensor, "theta_deg", cfg->sensor.theta_deg);
 
     cJSON *zones = cJSON_AddArrayToObject(root, "zones");
     for (uint8_t i = 0; i < cfg->zone_count; i++) {
@@ -245,7 +221,6 @@ size_t config_to_json(const room_config_t *cfg, char *out, size_t cap)
             const zone_action_t *a = &z->actions[j];
             cJSON *ao = cJSON_CreateObject();
             cJSON_AddStringToObject(ao, "type", "gpio");
-            cJSON_AddStringToObject(ao, "node_id", a->node_id);
             cJSON_AddNumberToObject(ao, "pin", a->pin);
             cJSON_AddNumberToObject(ao, "active_level", a->active_level);
             cJSON_AddStringToObject(ao, "mode", a->pulse ? "pulse" : "latch");
@@ -256,7 +231,6 @@ size_t config_to_json(const room_config_t *cfg, char *out, size_t cap)
     }
 
     cJSON *fz = cJSON_AddObjectToObject(root, "fusion");
-    cJSON_AddNumberToObject(fz, "merge_radius_mm", cfg->fusion.merge_radius_mm);
     cJSON_AddNumberToObject(fz, "assoc_gate_mm", cfg->fusion.assoc_gate_mm);
     cJSON_AddNumberToObject(fz, "coast_ms", cfg->fusion.coast_ms);
     cJSON_AddNumberToObject(fz, "moving_thresh_mms", cfg->fusion.moving_thresh_mms);
@@ -313,8 +287,8 @@ bool config_load(room_config_t *cfg)
         ESP_LOGW(TAG, "stored config unreadable; falling back to defaults");
         config_defaults(cfg);
     } else {
-        ESP_LOGI(TAG, "loaded config v%u: %u nodes, %u zones",
-                 (unsigned)cfg->version, cfg->node_count, cfg->zone_count);
+        ESP_LOGI(TAG, "loaded config v%u: %u zones",
+                 (unsigned)cfg->version, cfg->zone_count);
     }
     free(buf);
     return true;

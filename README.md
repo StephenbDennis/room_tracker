@@ -1,16 +1,19 @@
 # Room Tracker
 
-Indoor presence tracking with ESP32-S3 nodes and HLK-LD2450 24 GHz mmWave radar,
+Indoor presence tracking with an ESP32-S3 and an HLK-LD2450 24 GHz mmWave radar,
 configured from a static webpage over Web Bluetooth.
 
-Draw a room, place sensors in it, draw event boxes, and have a box drive a GPIO
-pin when the occupancy conditions you set are met.
+Draw a room, place the sensor in it, draw event boxes, and have a box drive a
+GPIO pin when the occupancy conditions you set are met.
 
 ```
-  GitHub Pages (static)  --Web Bluetooth-->  ESP32-S3 node  --ESP-NOW-->  more nodes
-   room + zone editor                        fusion + zones                  |
-   live floor plan                           GPIO outputs                  LD2450
+  GitHub Pages (static)  --Web Bluetooth-->  ESP32-S3 board
+   room + zone editor                        tracking + zones
+   live floor plan                           GPIO outputs  --UART--  LD2450
 ```
+
+**One board per room**, owning that room's sensor, zones and outputs. Rooms are
+independent: boards never talk to each other.
 
 ## What runs where
 
@@ -18,19 +21,16 @@ pin when the occupancy conditions you set are met.
 and visualisation client — close the browser and the automation keeps working.
 That is the constraint the whole architecture is built around.
 
-Every node runs the identical pipeline over the same merged detection set, so
-there is no coordinator and no single point of failure. Nodes can briefly
-disagree on track *identity* after packet loss; that is harmless, because zone
-rules are expressed over counts and motion states, never over track IDs.
+Each board is self-contained: it reads its own radar, tracks the people in its
+room, evaluates its own zones and drives its own pins. There is no coordinator,
+no peer protocol and no shared state to get out of sync.
 
 ## Before you start
 
 - **Web Bluetooth is Chrome/Edge desktop and Chrome Android only.** No iOS
   Safari, no Firefox. The simulator works everywhere.
-- **The LD2450 tracks at most 3 targets per sensor.** Fusing several sensors
-  raises the room total, not the per-sensor limit.
-- **BLE and ESP-NOW share one radio.** Coexistence is enabled in
-  `sdkconfig.defaults`; verify it under load before trusting a multi-node install.
+- **The LD2450 tracks at most 3 targets.** That is a hard ceiling on how many
+  people a room can distinguish.
 - **mmWave loses genuinely motionless people.** "Stopped" rules need the hold
   windows, or they will flap.
 
@@ -40,17 +40,16 @@ rules are expressed over counts and motion states, never over track IDs.
 firmware/          ESP-IDF project
   main/
     ld2450.c       radar frame parsing            [pure C, host-tested]
-    fusion.c       transform, merge, track        [pure C, host-tested]
+    fusion.c       transform, associate, track    [pure C, host-tested]
     zones.c        trigger/untrigger machine      [pure C, host-tested]
     config.c       JSON <-> struct, NVS
     actions.c      GPIO outputs
     ble_gatt.c     NimBLE server
-    espnow_link.c  peer heartbeat + detections
     app_main.c     wiring and the 10 Hz loop
   test/            host tests, plain gcc
-web/               Vite + TypeScript + React configurator
+docs/              Vite + TypeScript + React configurator
   src/sim/         offline simulator — no hardware needed
-docs/protocol.md   every wire format, in one place
+info/protocol.md   every wire format, in one place
 ```
 
 `ld2450.c`, `fusion.c` and `zones.c` deliberately have **zero ESP-IDF
@@ -63,12 +62,12 @@ instead of via flash-and-squint.
 ```bash
 cd firmware/test && make          # host tests, no toolchain needed
 
-cd firmware                       # requires ESP-IDF v5.x
+cd firmware                       # requires ESP-IDF v6.x
 idf.py set-target esp32s3
 idf.py build flash monitor
 ```
 
-Wiring, per node:
+Wiring:
 
 | LD2450 | ESP32-S3 |
 |---|---|
@@ -79,14 +78,13 @@ Wiring, per node:
 
 Pins are at the top of `firmware/main/app_main.c`.
 
-Each node derives its ID from its MAC (last three bytes) and registers itself in
-the room layout on first boot, so a fresh board is addressable before it has
-been configured.
+The board derives its ID from its MAC (last three bytes) and advertises as
+`node-<id>`, so a fresh board is addressable before it has been configured.
 
 ## Web app
 
 ```bash
-cd web
+cd docs
 npm install
 npm run dev        # http://localhost:5173
 npm test
@@ -105,15 +103,14 @@ runs. The whole UI is developable with nothing powered on.
 Configuration is **data**, never a reflash. Reflash only to add new capability,
 such as an action type beyond GPIO.
 
-1. Set the room size, drag sensors into place, set each one's facing.
+1. Set the room size, drag the sensor into place, set its facing.
 2. Add event boxes; drag to move, corner handle to resize.
 3. Set trigger conditions (motion state, count) and untrigger behaviour.
-4. Add a GPIO action, choosing which node owns the pin.
+4. Add a GPIO action and pick the pin.
 5. *Connect sensor*, then *Push config to device*.
 
-Nodes are configured one at a time. The device panel shows every node it hears
-over ESP-NOW along with each one's config version, so a node you forgot to
-update shows up as a badge rather than a silent inconsistency.
+The device panel shows the board's stored config version, so an edit that never
+reached it shows up as a badge rather than a silent inconsistency.
 
 ### Tuning that matters
 
@@ -129,9 +126,7 @@ update shows up as a badge rather than a silent inconsistency.
 
 1. Log raw UART at 256000 and confirm a 10 Hz frame cadence.
 2. Walk a known path; confirm the rendered position tracks reality to ~200 mm.
-3. Two nodes, one person, overlapping coverage: assert one fused track, not two.
+3. Two people in the room: assert two distinct tracks, not one.
 4. Meter the GPIO pin through an entry/exit cycle; verify the delay timings.
 5. **Kill the browser mid-session and confirm GPIO keeps firing.** This is the
    assertion that validates the on-device architecture.
-6. Run 10 Hz notify plus ESP-NOW broadcast for 30 minutes; watch for coexistence
-   dropouts.

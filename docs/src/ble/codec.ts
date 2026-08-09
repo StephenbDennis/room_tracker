@@ -29,15 +29,6 @@ export interface NodeStatus {
   config_version: number;
   uptime_s: number;
   config_mode: boolean;
-  peers: PeerStatus[];
-}
-
-export interface PeerStatus {
-  id: string;
-  name: string;
-  config_version: number;
-  age_ms: number;
-  rssi: number;
 }
 
 const MOTION: Motion[] = ['unknown', 'moving', 'stopped'];
