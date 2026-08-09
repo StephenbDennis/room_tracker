@@ -136,8 +136,10 @@ The add-on authenticates against Home Assistant accounts.
 1. Open **Home Assistant** in the side panel and tick *Report zones over MQTT*.
 2. *Scan for networks*, pick yours, and enter the WiFi password.
 3. Set the broker to `mqtt://<your-ha-ip>:1883` and enter the MQTT user and
-   password. `homeassistant.local` resolves too — lwIP answers `.local` by
-   mDNS — but an IP survives VLANs and flaky multicast.
+   password. This is **not** the Home Assistant web address: that is
+   `http://<host>:8123`, while the broker is a separate service on 1883.
+   `homeassistant.local` resolves too — lwIP answers `.local` by mDNS — but an
+   IP survives VLANs and flaky multicast.
 4. Optionally tick *Also report room size and people*.
 5. *Push config to device*, then **reboot it**: network settings are read only
    at startup.

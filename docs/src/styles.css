@@ -211,3 +211,5 @@ input[type='range'] { padding: 0; }
 }
 .networks li button { flex: 1; text-align: left; }
 .networks li button.sel { border-color: var(--accent); color: var(--accent); }
+
+.hint.warn { color: var(--warn); }

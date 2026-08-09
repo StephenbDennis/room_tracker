@@ -217,6 +217,43 @@ export function withBumpedVersion(cfg: RoomConfig): RoomConfig {
   return { ...cfg, version: cfg.version + 1 };
 }
 
+/* ---------- broker address ---------- */
+
+/* The commonest setup mistake is pasting the Home Assistant web address. The
+ * broker is a separate service on a different port, and the firmware can only
+ * report it as an opaque transport error long after the fact. */
+export interface MqttUriCheck {
+  problem: string | null;
+  /** A corrected value to offer, when the mistake is a recognisable one. */
+  suggestion?: string;
+}
+
+export function checkMqttUri(uri: string): MqttUriCheck {
+  const u = uri.trim();
+  if (u === '') return { problem: 'Enter the broker address.' };
+
+  const web = /^https?:\/\/([^/:]+)(?::\d+)?/i.exec(u);
+  if (web) {
+    return {
+      problem:
+        'That looks like the Home Assistant web address. The MQTT broker is a ' +
+        'separate service, usually on port 1883.',
+      suggestion: `mqtt://${web[1]}:1883`,
+    };
+  }
+
+  if (!/^mqtts?:\/\//i.test(u)) {
+    // A bare host or host:port is unambiguous enough to offer a fix for.
+    const bare = /^([A-Za-z0-9._-]+)(?::(\d+))?$/.exec(u);
+    return {
+      problem: 'Needs an mqtt:// prefix.',
+      suggestion: bare ? `mqtt://${bare[1]}:${bare[2] ?? '1883'}` : undefined,
+    };
+  }
+
+  return { problem: null };
+}
+
 /* ---------- validation ---------- */
 
 export function validateConfig(cfg: unknown): cfg is RoomConfig {

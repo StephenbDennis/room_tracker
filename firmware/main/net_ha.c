@@ -281,6 +281,18 @@ static void mqtt_start(void)
         return;
     }
 
+    /* esp-mqtt reports an unusable scheme as "Not support this mqtt scheme
+     * <x>" and then "Failed to create transport list", which says nothing
+     * about the actual mistake -- almost always the Home Assistant web address
+     * pasted in place of the broker. */
+    const char *uri = s_cfg.network.mqtt_uri;
+    if (strncmp(uri, "mqtt://", 7) != 0 && strncmp(uri, "mqtts://", 8) != 0) {
+        ESP_LOGE(TAG, "broker URI \"%s\" is not mqtt:// or mqtts://", uri);
+        ESP_LOGE(TAG, "the Home Assistant web address is not the broker; "
+                      "Mosquitto is usually mqtt://<same host>:1883");
+        return;
+    }
+
     snprintf(s_avail_topic, sizeof s_avail_topic, "%s/%s/availability",
              s_cfg.network.base_topic, s_node_id);
 

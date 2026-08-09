@@ -7,7 +7,11 @@ import type {
   UntriggerMode,
   Zone,
 } from '../model/config';
-import { loadNetworkDefaults, saveNetworkDefaults } from '../model/config';
+import {
+  checkMqttUri,
+  loadNetworkDefaults,
+  saveNetworkDefaults,
+} from '../model/config';
 import type { NodeStatus, WifiNetwork } from '../ble/codec';
 import { useState } from 'react';
 
@@ -380,6 +384,7 @@ export function NetworkPanel({
 }) {
   const net = config.network;
   const [remember, setRemember] = useState(() => loadNetworkDefaults() !== null);
+  const uriCheck = checkMqttUri(net.mqtt_uri);
 
   const patch = (p: Partial<NetworkCfg>) => {
     const next = { ...net, ...p };
@@ -453,10 +458,26 @@ export function NetworkPanel({
             Broker
             <input
               value={net.mqtt_uri}
-              placeholder="mqtt://homeassistant.local:1883"
+              placeholder="mqtt://10.0.0.5:1883"
               onChange={(e) => patch({ mqtt_uri: e.target.value })}
             />
           </label>
+          {uriCheck.problem && (
+            <p className="hint warn">
+              {uriCheck.problem}
+              {uriCheck.suggestion && (
+                <>
+                  {' '}
+                  <button
+                    className="small"
+                    onClick={() => patch({ mqtt_uri: uriCheck.suggestion! })}
+                  >
+                    Use {uriCheck.suggestion}
+                  </button>
+                </>
+              )}
+            </p>
+          )}
           <div className="row">
             <label>
               MQTT user
