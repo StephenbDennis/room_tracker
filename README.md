@@ -126,17 +126,58 @@ reached it shows up as a badge rather than a silent inconsistency.
 Optional, and off until you fill it in — with reporting disabled the radio
 stays BLE-only.
 
-**In Home Assistant first:** install and start the **Mosquitto broker** add-on,
-add the **MQTT** integration (usually offered automatically once Mosquitto is
-running), and create a user under *Settings → People → Users* for the board.
-The add-on authenticates against Home Assistant accounts.
+**You need an MQTT broker first.** How depends on how Home Assistant runs.
+
+*Home Assistant OS or Supervised* — install and start the **Mosquitto broker**
+add-on, then create a user under *Settings → People → Users* for the board. The
+add-on authenticates against Home Assistant accounts, so that user's password
+is what the board uses.
+
+*Home Assistant in Docker* — there are no add-ons, so run a broker alongside it
+and give it its own credentials. Home Assistant accounts mean nothing to it:
+
+```yaml
+# docker-compose.yml
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    ports: ["1883:1883"]        # must reach the LAN, not just other containers
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/data:/mosquitto/data
+```
+
+```conf
+# mosquitto/config/mosquitto.conf
+listener 1883                  # Mosquitto 2.x binds localhost only without this
+allow_anonymous false
+password_file /mosquitto/config/passwd
+persistence true
+persistence_location /mosquitto/data/
+```
+
+```bash
+docker compose exec mosquitto \
+  mosquitto_passwd -c -b /mosquitto/config/passwd roomtrack 'a-password'
+docker compose restart mosquitto
+```
+
+Then add the **MQTT** integration in Home Assistant pointing at that broker with
+those same credentials — Home Assistant is just another client of it.
+
+To rule auth in or out quickly, set `allow_anonymous true`, leave the board's
+MQTT user and password blank, and restart the broker. The firmware sends no
+credentials when those fields are empty, so if it connects, the problem is the
+password and nothing else.
 
 **Then on the board**, connected over BLE:
 
 1. Open **Home Assistant** in the side panel and tick *Report zones over MQTT*.
 2. *Scan for networks*, pick yours, and enter the WiFi password.
-3. Set the broker to `mqtt://<your-ha-ip>:1883` and enter the MQTT user and
-   password. This is **not** the Home Assistant web address: that is
+3. Set the broker to `mqtt://<broker-host-ip>:1883` and enter the **broker's**
+   MQTT user and password — which are Home Assistant's own account only when
+   the Mosquitto add-on is doing the authenticating. This is **not** the Home Assistant web address: that is
    `http://<host>:8123`, while the broker is a separate service on 1883.
    `homeassistant.local` resolves too — lwIP answers `.local` by mDNS — but an
    IP survives VLANs and flaky multicast.
