@@ -126,13 +126,30 @@ reached it shows up as a badge rather than a silent inconsistency.
 Optional, and off until you fill it in — with reporting disabled the radio
 stays BLE-only.
 
-1. In the web app, open **Home Assistant**, tick *Report zones over MQTT*, and
-   enter the WiFi network and your broker (`mqtt://homeassistant.local:1883`).
-2. Push the config, then reboot the board: network settings are read at start.
-3. Each event box appears in Home Assistant as an occupancy `binary_sensor`,
-   grouped under one device, via MQTT discovery. No YAML.
-4. Optionally tick *Also report room size and people* for a `people` sensor
-   whose attributes carry the room dimensions and each person's position.
+**In Home Assistant first:** install and start the **Mosquitto broker** add-on,
+add the **MQTT** integration (usually offered automatically once Mosquitto is
+running), and create a user under *Settings → People → Users* for the board.
+The add-on authenticates against Home Assistant accounts.
+
+**Then on the board**, connected over BLE:
+
+1. Open **Home Assistant** in the side panel and tick *Report zones over MQTT*.
+2. *Scan for networks*, pick yours, and enter the WiFi password.
+3. Set the broker to `mqtt://<your-ha-ip>:1883` and enter the MQTT user and
+   password. `homeassistant.local` resolves too — lwIP answers `.local` by
+   mDNS — but an IP survives VLANs and flaky multicast.
+4. Optionally tick *Also report room size and people*.
+5. *Push config to device*, then **reboot it**: network settings are read only
+   at startup.
+
+The monitor should then show `wifi up`, `MQTT connected` and
+`published discovery for N zone(s)`. Each event box arrives in Home Assistant
+as an occupancy `binary_sensor`, grouped under one device, with no YAML.
+
+**If nothing appears, check you have at least one event box.** Discovery
+publishes an entity per zone, so a board with no zones and people reporting off
+publishes nothing at all and never shows up — which looks exactly like a broker
+problem and is not one.
 
 Network settings belong to the house rather than to a room, so the web app can
 remember them: tick *Remember for other boards* and the next board you connect
