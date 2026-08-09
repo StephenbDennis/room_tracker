@@ -273,23 +273,23 @@ size_t config_to_json(const room_config_t *cfg, char *out, size_t cap,
     cJSON_AddNumberToObject(fz, "stopped_thresh_mms", cfg->fusion.stopped_thresh_mms);
     cJSON_AddNumberToObject(fz, "stopped_hold_ms", cfg->fusion.stopped_hold_ms);
 
-    const network_cfg_t *n = &cfg->network;
+    const network_cfg_t *netConfig = &cfg->network;
     cJSON *net = cJSON_AddObjectToObject(root, "network");
-    cJSON_AddBoolToObject(net, "enabled", n->enabled);
-    cJSON_AddStringToObject(net, "wifi_ssid", n->wifi_ssid);
-    cJSON_AddStringToObject(net, "mqtt_uri", n->mqtt_uri);
-    cJSON_AddStringToObject(net, "mqtt_user", n->mqtt_user);
-    cJSON_AddStringToObject(net, "base_topic", n->base_topic);
-    cJSON_AddStringToObject(net, "discovery_prefix", n->discovery_prefix);
+    cJSON_AddBoolToObject(net, "enabled", netConfig->enabled);
+    cJSON_AddStringToObject(net, "wifi_ssid", netConfig->wifi_ssid);
+    cJSON_AddStringToObject(net, "mqtt_uri", netConfig->mqtt_uri);
+    cJSON_AddStringToObject(net, "mqtt_user", netConfig->mqtt_user);
+    cJSON_AddStringToObject(net, "base_topic", netConfig->base_topic);
+    cJSON_AddStringToObject(net, "discovery_prefix", netConfig->discovery_prefix);
 
     if (mode == CONFIG_JSON_WITH_SECRETS) {
-        cJSON_AddStringToObject(net, "wifi_pass", n->wifi_pass);
-        cJSON_AddStringToObject(net, "mqtt_pass", n->mqtt_pass);
+        cJSON_AddStringToObject(net, "wifi_pass", netConfig->wifi_pass);
+        cJSON_AddStringToObject(net, "mqtt_pass", netConfig->mqtt_pass);
     } else {
         /* Report only whether a password is stored, never the value. The
          * webpage shows "saved" and sends an empty string to keep it. */
-        cJSON_AddBoolToObject(net, "wifi_pass_set", n->wifi_pass[0] != '\0');
-        cJSON_AddBoolToObject(net, "mqtt_pass_set", n->mqtt_pass[0] != '\0');
+        cJSON_AddBoolToObject(net, "wifi_pass_set", netConfig->wifi_pass[0] != '\0');
+        cJSON_AddBoolToObject(net, "mqtt_pass_set", netConfig->mqtt_pass[0] != '\0');
     }
 
     char *s = cJSON_PrintUnformatted(root);

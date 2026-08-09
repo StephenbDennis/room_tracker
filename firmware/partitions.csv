@@ -1,0 +1,12 @@
+# 16 MB flash. The built-in single-app layouts are sized for 2-4 MB parts and
+# leave the app a megabyte or so; WiFi, lwIP and NimBLE together already fill
+# most of that, and running out mid-feature costs a repartition, which wipes
+# NVS and with it the room's configuration. So the app gets room to grow.
+#
+# Everything past 0x410000 is deliberately unallocated: adding OTA slots or a
+# filesystem later should not have to move nvs and lose the stored config.
+#
+# Name,     Type, SubType, Offset,   Size, Flags
+nvs,        data, nvs,     ,        0x6000,
+phy_init,   data, phy,     ,        0x1000,
+factory,    app,  factory, 0x10000, 4M,

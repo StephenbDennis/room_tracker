@@ -68,6 +68,14 @@ idf.py set-target esp32s3
 idf.py build flash monitor
 ```
 
+`sdkconfig` is generated and gitignored, and **`sdkconfig.defaults` only seeds a
+new one**. After pulling changes that touch it — flash size, partition table,
+WiFi, the NimBLE task stack — delete `firmware/sdkconfig` and rebuild, or the
+old values silently persist.
+
+The board is 16 MB and the app partition is 4 MB (`partitions.csv`); ESP-IDF
+defaults to 2 MB and a 1 MB app, which WiFi plus NimBLE does not fit in.
+
 Wiring:
 
 | LD2450 | ESP32-S3 |
