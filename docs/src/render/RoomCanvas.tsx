@@ -65,6 +65,9 @@ export function RoomCanvas({
   const ref = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 800, h: 600 });
   const drag = useRef<DragKind>(null);
+  // Which pointer owns the drag. The canvas allows pinch-zoom, so a second
+  // finger must not hijack an in-flight drag or start one of its own.
+  const dragPointer = useRef<number | null>(null);
 
   // Keep the backing store matched to the element's CSS size and DPR, or the
   // whole scene renders blurry on retina displays.
@@ -126,6 +129,9 @@ export function RoomCanvas({
   }
 
   function onPointerDown(e: React.PointerEvent<HTMLCanvasElement>) {
+    // A second finger is the start of a pinch, not a new drag.
+    if (dragPointer.current !== null) return;
+
     const rect = e.currentTarget.getBoundingClientRect();
     const w = toWorld(view(), e.clientX - rect.left, e.clientY - rect.top);
     const { sel, resize } = hitTest(w.x, w.y);
@@ -133,6 +139,7 @@ export function RoomCanvas({
     onSelect(sel);
     if (!sel) return;
 
+    dragPointer.current = e.pointerId;
     e.currentTarget.setPointerCapture(e.pointerId);
 
     if (sel.kind === 'zone') {
@@ -151,7 +158,7 @@ export function RoomCanvas({
 
   function onPointerMove(e: React.PointerEvent<HTMLCanvasElement>) {
     const d = drag.current;
-    if (!d) return;
+    if (!d || e.pointerId !== dragPointer.current) return;
 
     const rect = e.currentTarget.getBoundingClientRect();
     const w = toWorld(view(), e.clientX - rect.left, e.clientY - rect.top);
@@ -184,9 +191,15 @@ export function RoomCanvas({
     }
   }
 
+  /* Also the pointercancel handler: the browser fires that on the first finger
+   * the moment a pinch begins, which is exactly when the drag should stop. */
   function onPointerUp(e: React.PointerEvent<HTMLCanvasElement>) {
+    if (e.pointerId !== dragPointer.current) return;
     drag.current = null;
-    e.currentTarget.releasePointerCapture(e.pointerId);
+    dragPointer.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
   }
 
   return (

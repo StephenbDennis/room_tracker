@@ -20,13 +20,16 @@ body {
   font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, sans-serif;
 }
 
-.app { display: flex; flex-direction: column; height: 100vh; }
+/* dvh so the mobile URL bar collapsing does not crop the layout; the vh line
+ * stays as the fallback for browsers without dynamic viewport units. */
+.app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
 
 header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
+  gap: 8px 16px;
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
@@ -34,7 +37,7 @@ header {
 
 header h1 { font-size: 16px; margin: 0; font-weight: 600; }
 
-.actions { display: flex; gap: 8px; align-items: center; }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 
 button, .file-btn {
   background: #202836;
@@ -72,8 +75,15 @@ button.small { padding: 2px 8px; align-self: end; }
 
 main { display: flex; flex: 1; min-height: 0; }
 
-.canvas-wrap { flex: 1; min-width: 0; position: relative; }
-.room-canvas { display: block; touch-action: none; cursor: crosshair; }
+/* The canvas is sized in explicit pixels with a 320px floor, so on a narrower
+ * screen it would otherwise push the page into horizontal scroll. */
+.canvas-wrap { flex: 1; min-width: 0; position: relative; overflow: hidden; }
+
+/* `none` would be simpler, but it hands the canvas every touch gesture
+ * including pinch, so there is no way to zoom the plan on a phone.
+ * `pinch-zoom` lets the browser keep two-finger zoom while single-finger
+ * drags still reach the pointer handlers, which is what moves zones. */
+.room-canvas { display: block; touch-action: pinch-zoom; cursor: crosshair; }
 
 aside {
   width: 330px;
@@ -152,3 +162,41 @@ input[type='range'] { padding: 0; }
   font-size: 12px;
 }
 .crash-actions { display: flex; gap: 8px; }
+
+/* ---------- mobile ---------- */
+
+/* Below this the 330px sidebar leaves the plan too narrow to work in, so the
+   two stack and the page scrolls instead of the sidebar. */
+@media (max-width: 760px) {
+  .app { height: auto; min-height: 100vh; min-height: 100dvh; }
+
+  header { padding: 10px 12px; }
+  header h1 { font-size: 15px; }
+
+  main { flex-direction: column; }
+
+  /* Bounded rather than flex:1 — the canvas must not eat the whole screen
+     when the page is scrollable, or there is nothing left to scroll from. */
+  .canvas-wrap { flex: none; height: 52vh; height: 52dvh; min-height: 260px; }
+
+  aside {
+    width: auto;
+    border-left: none;
+    border-top: 1px solid var(--border);
+    overflow-y: visible;
+  }
+
+  .toolbar button, .toolbar .file-btn { flex: 1 1 auto; }
+}
+
+/* Touch targets, independent of width: a stylus or touchscreen laptop wants
+   these too. 16px inputs stop mobile browsers zooming in on focus. */
+@media (pointer: coarse) {
+  button, .file-btn { min-height: 40px; padding: 8px 14px; font-size: 14px; }
+  button.small { min-height: 32px; padding: 4px 10px; }
+  input, select { min-height: 40px; font-size: 16px; }
+  input[type='range'] { min-height: 32px; }
+  /* min-height:0 or the 40px above stretches the box to four times its size. */
+  input[type='checkbox'] { width: 20px; height: 20px; min-height: 0; }
+  label { font-size: 13px; }
+}

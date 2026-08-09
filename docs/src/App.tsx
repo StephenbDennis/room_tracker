@@ -25,6 +25,7 @@ export default function App() {
   const [dirty, setDirty] = useState(false);
 
   const configRef = useRef(config);
+  const asideRef = useRef<HTMLElement>(null);
   configRef.current = config;
 
   useEffect(() => saveLocal(config), [config]);
@@ -134,6 +135,14 @@ export default function App() {
     });
   }
 
+  // Stacked on a phone, the editor sits below the fold: tapping a zone would
+  // otherwise look like it did nothing at all.
+  useEffect(() => {
+    if (!selected) return;
+    if (!window.matchMedia('(max-width: 760px)').matches) return;
+    asideRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [selected]);
+
   const selectedZone = useMemo(
     () =>
       selected?.kind === 'zone'
@@ -189,7 +198,7 @@ export default function App() {
           />
         </div>
 
-        <aside>
+        <aside ref={asideRef}>
           <div className="toolbar">
             <button onClick={addZone}>+ Event box</button>
             <button onClick={exportJson}>Export</button>
